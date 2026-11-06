@@ -20,6 +20,8 @@ from custom_components.haeo_homusman.core.const import (
     CONF_HORIZON,
     CONF_NAME,
     CONF_RELAX_INFEASIBLE,
+    CONF_STABILITY_PENALTY_CENTS,
+    CONF_STABILITY_WINDOW_MINUTES,
     DEFAULT_DEBOUNCE_SECONDS,
 )
 from custom_components.haeo_homusman.core.const import HUB_SECTION_ADVANCED as HUB_SECTION_ADVANCED
@@ -103,7 +105,7 @@ def get_hub_options_schema(config_entry: ConfigEntry, preset_labels: Mapping[str
         ),
         SectionDefinition(
             key=HUB_SECTION_ADVANCED,
-            fields=(CONF_DEBOUNCE_SECONDS, CONF_ADVANCED_MODE, CONF_RELAX_INFEASIBLE, CONF_RECORD_FORECASTS),
+            fields=(CONF_DEBOUNCE_SECONDS, CONF_ADVANCED_MODE, CONF_RELAX_INFEASIBLE, CONF_STABILITY_PENALTY_CENTS, CONF_STABILITY_WINDOW_MINUTES, CONF_RECORD_FORECASTS),
             collapsed=True,
         ),
     )
@@ -137,6 +139,20 @@ def get_hub_options_schema(config_entry: ConfigEntry, preset_labels: Mapping[str
                     default=advanced_data.get(CONF_RELAX_INFEASIBLE, False),
                 ),
                 bool,
+            ),
+            CONF_STABILITY_PENALTY_CENTS: (
+                vol.Required(
+                    CONF_STABILITY_PENALTY_CENTS,
+                    default=advanced_data.get(CONF_STABILITY_PENALTY_CENTS, 0.0),
+                ),
+                vol.All(vol.Coerce(float), vol.Range(min=0.0, max=50.0)),
+            ),
+            CONF_STABILITY_WINDOW_MINUTES: (
+                vol.Required(
+                    CONF_STABILITY_WINDOW_MINUTES,
+                    default=advanced_data.get(CONF_STABILITY_WINDOW_MINUTES, 60),
+                ),
+                vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
             ),
             CONF_RECORD_FORECASTS: (
                 vol.Required(
