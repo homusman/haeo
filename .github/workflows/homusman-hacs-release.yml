@@ -84,6 +84,5 @@ jobs:
         run: |
           gh release create "v${{ steps.version.outputs.version }}" \
             haeo_homusman.zip --repo "${{ github.repository }}" \
-            --target "v${{ steps.version.outputs.version }}" \
             --title "HAEO - Homusman fork v${{ steps.version.outputs.version }}" \
             --generate-notes --latest
