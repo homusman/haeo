@@ -1,3 +1,30 @@
+> [!IMPORTANT]
+> **HAEO - Homusman fork (experimental, independently installable).**
+> This fork installs as `custom_components/haeo_homusman` (domain `haeo_homusman`),
+> so it can run alongside the original `haeo` integration. It has separate
+> Home Assistant configuration entries and output entities; it **does not**
+> overwrite or automatically import the original HAEO configuration.
+>
+> **HACS:** Add `https://github.com/homusman/haeo` as a custom **Integration**
+> repository, install **HAEO - Homusman fork**, restart Home Assistant, then
+> add the fork from **Settings → Devices & Services → Add Integration**.
+> The custom HACS release contains `haeo_homusman.zip`.
+>
+> **Experimental stability objective:** Under the fork's advanced hub options,
+> set `stability_penalty_cents_per_kwh` (default 0, disabled) and
+> `stability_window_minutes` (default 60). Recommended initial comparison:
+> 2 cents/kWh over 60 minutes. The solver adds a timestamp-aligned, linearly
+> decaying monetary penalty to changes in planned net battery kW versus the last
+> successful plan. The actual electricity cost remains separately reported.
+> It is not a hard power-change limit or a fixed on/off switching charge.
+>
+> **For safe comparison:** Keep the original HAEO Dispatch Controller pointed
+> at the original HAEO sensors. The fork optimises independently and must not
+> issue simultaneous competing commands to the same inverters. Test first with
+> the penalty disabled, then enable it for a controlled A/B comparison.
+
+---
+
 <p align="center">
     <img src="docs/assets/logo.svg" alt="HAEO Logo" width="512">
 </p>
