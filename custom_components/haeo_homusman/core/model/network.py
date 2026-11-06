@@ -28,7 +28,7 @@ from .elements.deferrable_load import DeferrableLoad, DeferrableLoadElementConfi
 from .elements.node import Node, NodeElementConfig
 from .elements.policy_pricing import PolicyPricing, PolicyPricingElementConfig
 from .infeasibility import InfeasibleError, Relaxation, RowLabel, conflicting_rows, listing, row_labels, solve_relaxed
-from .linear import LinearArray, total
+from .linear import LinearArray, Rows, total
 from .solver import Solver
 from .util.solver_rows import RowIndices, add_rows, update_rows
 
