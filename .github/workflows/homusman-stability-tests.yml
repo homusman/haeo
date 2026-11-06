@@ -26,4 +26,4 @@ jobs:
       - name: Verify Python syntax
         run: python -m compileall -q custom_components/haeo_homusman
       - name: Test economic stability behavior
-        run: python -m pytest -q --noconftest -o addopts='' tests/test_homusman_stability.py
+        run: python -m pytest -q --noconftest -c /dev/null tests/test_homusman_stability.py
