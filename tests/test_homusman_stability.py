@@ -1,6 +1,16 @@
 """Regression tests for the independent Homusman fork's LP stability cost."""
+import sys
+from pathlib import Path
+from types import ModuleType
+
 import numpy as np
 import pytest
+
+# The LP model is standalone. Avoid importing the HA integration's __init__
+# in this fast numeric test environment, which has no Home Assistant runtime.
+package = ModuleType("custom_components.haeo_homusman")
+package.__path__ = [str(Path(__file__).resolve().parents[1] / "custom_components" / "haeo_homusman")]
+sys.modules.setdefault("custom_components.haeo_homusman", package)
 
 from custom_components.haeo_homusman.core.model import Network
 from custom_components.haeo_homusman.core.model.elements import (
