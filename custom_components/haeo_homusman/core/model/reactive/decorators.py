@@ -1,0 +1,321 @@
+"""Decorator classes for reactive caching of constraints and costs."""
+
+from collections.abc import Callable
+from functools import partial
+from typing import TypeVar, overload
+
+from custom_components.haeo_homusman.core.model.const import OutputType
+from custom_components.haeo_homusman.core.model.linear import Rows
+from custom_components.haeo_homusman.core.model.output_data import ModelOutputValue, OutputData
+from custom_components.haeo_homusman.core.model.util.solver_rows import RowIndices, add_rows, update_rows
+
+from .protocols import ReactiveHost
+from .tracked_param import (
+    DecoratorState,
+    Dependency,
+    ensure_decorator_state,
+    record_access,
+    register_dependencies,
+    tracking_context,
+)
+
+# Type variable for generic return types
+R = TypeVar("R")
+
+
+class ReactiveMethod[R]:
+    """Descriptor/decorator that caches method results with automatic dependency tracking.
+
+    On first call, tracks which TrackedParam values are accessed and caches the result.
+    Subsequent calls return cached result unless the method was invalidated.
+    A reactive method that calls this one depends on it, so invalidating this
+    method invalidates its callers too.
+
+    Used directly through ``@computed`` for values computed from parameters, such
+    as a segment's transformed flow, that constraints and costs build on.
+    """
+
+    def __init__(self, fn: Callable[..., R]) -> None:
+        """Initialize with the method."""
+        self._fn = fn
+        self._name: str = fn.__name__
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Store the method name."""
+        self._name = name
+
+    @overload
+    def __get__(self, obj: None, objtype: type) -> "ReactiveMethod[R]": ...
+
+    @overload
+    def __get__(self, obj: "ReactiveHost", objtype: type) -> Callable[[], R]: ...
+
+    def __get__(self, obj: "ReactiveHost | None", objtype: type) -> "ReactiveMethod[R] | Callable[[], R]":
+        """Return bound method that uses caching."""
+        if obj is None:
+            return self
+        return partial(self._call, obj)
+
+    def _call(self, obj: "ReactiveHost") -> R:
+        """Execute with caching and dependency tracking."""
+        # A method calling this one depends on it
+        record_access(obj, f"method:{self._name}")
+
+        state = ensure_decorator_state(obj, self._name)
+
+        # Return cached if not invalidated
+        if not state["invalidated"]:
+            return state["result"]  # type: ignore[return-value]  # the cached result is the one this method returned
+
+        result = self._compute(obj, state)
+        state["result"] = result
+        return result
+
+    def _compute(self, obj: "ReactiveHost", state: DecoratorState) -> R:
+        """Run the method, recording and registering everything it reads."""
+        tracking: set[Dependency] = set()
+        token = tracking_context.set(tracking)
+        try:
+            result = self._fn(obj)
+        finally:
+            tracking_context.reset(token)
+
+        register_dependencies(obj, self._name, tracking, state["deps"])
+        state["deps"] = tracking
+        state["invalidated"] = False
+        return result
+
+
+class ReactiveConstraint[R](ReactiveMethod[R]):
+    """Decorator that caches constraint expressions with automatic dependency tracking.
+
+    Handles the full constraint lifecycle:
+    1. Computes expressions
+    2. Creates constraints in solver (first call)
+    3. Updates constraints in solver (when invalidated)
+    4. Tracks dependencies for invalidation
+
+    Usage:
+        class Battery(Element):
+            capacity = TrackedParam[NDArray[np.float64]]()
+
+            @constraint(output=True, unit="$/kWh")
+            def battery_soc_max(self) -> Rows:
+                return self.stored_energy[1:] <= self.capacity[1:]
+
+    """
+
+    def __init__(self, fn: Callable[..., R], *, output: bool = False, unit: str = "$/kW") -> None:
+        """Initialize constraint decorator.
+
+        Args:
+            fn: The constraint function
+            output: If True, expose as shadow price output (default False)
+            unit: Unit for shadow price output (default "$/kW")
+
+        """
+        super().__init__(fn)
+        self.output = output
+        self.unit = unit
+
+    def get_output(self, obj: "ReactiveHost") -> "OutputData | None":
+        """Get output data for this constraint (shadow prices if output=True).
+
+        Args:
+            obj: The reactive host instance (Element or Segment)
+
+        Returns:
+            OutputData with shadow prices, or None if output=False or constraint not yet applied
+
+        """
+        if not self.output:
+            return None
+
+        cons = applied_constraint(obj, self._name)
+        if cons is None:
+            return None
+
+        # Extract shadow prices from the constraint using the solver
+        duals = obj._solver.row_duals()  # noqa: SLF001 (tightly coupled reactive infrastructure requires solver access) # pyright: ignore[reportPrivateUsage]
+        values = tuple(duals[cons].tolist())
+
+        return OutputData(
+            type=OutputType.SHADOW_PRICE,
+            unit=self.unit,
+            values=values,
+            diagnostic=True,
+        )
+
+    def _call(self, obj: "ReactiveHost") -> R:
+        """Execute with caching, dependency tracking, and solver lifecycle management."""
+        # A method calling this one depends on it
+        record_access(obj, f"method:{self._name}")
+
+        state = ensure_decorator_state(obj, self._name)
+
+        # Check if we need to recompute
+        if not state["invalidated"]:
+            return state["result"]  # type: ignore[return-value]  # the cached result is the one this method returned
+
+        result = self._compute(obj, state)
+        if not isinstance(result, Rows):
+            state["invalidated"] = True
+            msg = (
+                f"Constraint {self._name} returned {type(result).__name__}; return its rows, using free rows for "
+                "parts that do not apply"
+            )
+            raise TypeError(msg)
+        solver = obj._solver  # noqa: SLF001 (tightly coupled reactive infrastructure requires solver access) # pyright: ignore[reportPrivateUsage]
+
+        # Rows are only recorded as applied once the solver has them, so a failed
+        # write is retried on the next call instead of being cached as applied.
+        try:
+            if "constraint" in state and "applied" in state:
+                existing = state["constraint"]
+                if len(result) != len(existing):
+                    msg = (
+                        f"Constraint {self._name} returned {len(result)} rows after {len(existing)}; "
+                        "return free rows for parts that do not apply so the row count stays the same"
+                    )
+                    raise ValueError(msg)
+                state["applied"] = update_rows(solver, existing, state["applied"], result)
+            else:
+                state["constraint"], state["applied"] = add_rows(solver, result)
+        except Exception:
+            state["invalidated"] = True
+            raise
+
+        state["result"] = result
+        return result
+
+
+def applied_constraint(obj: "ReactiveHost", name: str) -> RowIndices | None:
+    """Return a constraint's row indices if any of them currently binds, otherwise None.
+
+    A constraint whose rows are all free is in the LP but does not apply, so it has
+    no shadow price and is not listed as a constraint.
+    """
+    state = getattr(obj, f"_reactive_state_{name}", None)
+    if state is None or "constraint" not in state or state["applied"].is_free:
+        return None
+    return state["constraint"]
+
+
+class ReactiveCost[R](ReactiveMethod[R]):
+    """Decorator that caches cost expressions with automatic dependency tracking.
+
+    Tracks dependencies on both TrackedParam values and other cached methods.
+    When called by another cached method, records access to establish dependency.
+    """
+
+
+class OutputMethod[R]:
+    """Decorator that marks a method as an output for reflection-based discovery.
+
+    Unlike @constraint and @cost, output methods are not cached - they extract
+    fresh values from the solver on each call. The decorator is used purely for
+    reflection-based discovery via `outputs()`.
+
+    Usage:
+        class Battery(Element):
+            @output
+            def power_charge(self) -> OutputData:
+                return OutputData(type=OutputType.POWER, unit="kW", ...)
+    """
+
+    def __init__(self, fn: Callable[..., R], *, output_name: str | None = None) -> None:
+        """Initialize with the method."""
+        self._fn = fn
+        self._name: str = fn.__name__
+        self._output_name: str | None = output_name
+
+    def __set_name__(self, owner: type, name: str) -> None:
+        """Store the method name."""
+        self._name = name
+        if self._output_name is None:
+            self._output_name = name
+
+    @overload
+    def __get__(self, obj: None, objtype: type) -> "OutputMethod[R]": ...
+
+    @overload
+    def __get__(self, obj: ReactiveHost, objtype: type) -> Callable[[], R]: ...
+
+    def __get__(self, obj: "ReactiveHost | None", objtype: type) -> "OutputMethod[R] | Callable[[], R]":
+        """Return bound method."""
+        if obj is None:
+            return self
+        return partial(self._fn, obj)
+
+    @property
+    def output_name(self) -> str:
+        """Return the output name exposed by this method."""
+        return self._output_name or self._name
+
+    def get_output(self, obj: ReactiveHost) -> "ModelOutputValue | None":
+        """Get output data for this output method.
+
+        Args:
+            obj: The element instance
+
+        Returns:
+            OutputData or nested output mapping from calling the method, or None if method returns None
+
+        """
+        method = getattr(obj, self._name)
+        return method()
+
+
+# Decorator shortcuts for cleaner syntax
+@overload
+def constraint[R](fn: Callable[..., R], /) -> ReactiveConstraint[R]: ...
+
+
+@overload
+def constraint(*, output: bool = False, unit: str = "$/kW") -> Callable[[Callable[..., R]], ReactiveConstraint[R]]: ...
+
+
+def constraint[R](
+    fn: Callable[..., R] | None = None, /, *, output: bool = False, unit: str = "$/kW"
+) -> ReactiveConstraint[R] | Callable[[Callable[..., R]], ReactiveConstraint[R]]:
+    """Decorate constraint methods with automatic caching and dependency tracking.
+
+    Can be used with or without arguments:
+    - @constraint - basic constraint
+    - @constraint(output=True, unit="$/kWh") - constraint that generates shadow price output
+
+    Args:
+        fn: The function to decorate (when used without arguments)
+        output: If True, expose as shadow price output (default False)
+        unit: Unit for shadow price output (default "$/kW")
+
+    Returns:
+        Decorated function or decorator factory
+
+    """
+    if fn is not None:
+        # Called without arguments: @constraint
+        return ReactiveConstraint(fn, output=output, unit=unit)
+    # Called with arguments: @constraint(output=True, unit="$/kWh")
+    return lambda f: ReactiveConstraint(f, output=output, unit=unit)
+
+
+cost = ReactiveCost
+computed = ReactiveMethod
+
+
+@overload
+def output[R](fn: Callable[..., R], /) -> OutputMethod[R]: ...
+
+
+@overload
+def output(*, name: str) -> Callable[[Callable[..., R]], OutputMethod[R]]: ...
+
+
+def output[R](
+    fn: Callable[..., R] | None = None, /, *, name: str | None = None
+) -> OutputMethod[R] | Callable[[Callable[..., R]], OutputMethod[R]]:
+    """Decorate methods as outputs, optionally overriding their output name."""
+    if fn is not None:
+        return OutputMethod(fn, output_name=name)
+    return lambda f: OutputMethod(f, output_name=name)

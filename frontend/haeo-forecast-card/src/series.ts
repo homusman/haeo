@@ -202,7 +202,7 @@ function bufferOwners(hass: HassLike, config: ForecastCardConfig): Map<string, s
   const owners = new Map<string, string>();
   const resolution = resolveTopology(
     {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       ...(config.hub_entry_id === undefined ? {} : { hub_entry_id: config.hub_entry_id }),
     },
     hass

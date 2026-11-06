@@ -23,10 +23,10 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.json import json_dumps
 
-from custom_components.haeo import CARD_STATIC_DIR, card_static_url
-from custom_components.haeo.const import DOMAIN
-from custom_components.haeo.core.schema.elements.element_type import ElementType
-from custom_components.haeo.core.schema.elements.policy import CONF_ENABLED, CONF_RULE_NAME, CONF_RULES
+from custom_components.haeo_homusman import CARD_STATIC_DIR, card_static_url
+from custom_components.haeo_homusman.const import DOMAIN
+from custom_components.haeo_homusman.core.schema.elements.element_type import ElementType
+from custom_components.haeo_homusman.core.schema.elements.policy import CONF_ENABLED, CONF_RULE_NAME, CONF_RULES
 
 from .capture import ScreenshotContext, guide_step
 
@@ -389,7 +389,7 @@ def show_forecast_card(
         return attributes.get("element_name") in elements
 
     config = {
-        "type": "custom:haeo-forecast-card",
+        "type": "custom:haeo-homusman-forecast-card",
         "hub_entry_id": _hub_entry_id(hass),
         "default_horizon": horizon,
         "tooltip_visible": False,
@@ -398,7 +398,7 @@ def show_forecast_card(
         page,
         hass,
         ctx,
-        tag="haeo-forecast-card",
+        tag="haeo-homusman-forecast-card",
         config=config,
         entity_filter=_shows,
         step=step,
@@ -414,12 +414,12 @@ def show_topology_card(page: HAPage, hass: LiveHomeAssistant, *, step: str) -> N
     ctx = ScreenshotContext.current()
     if ctx is None:
         return
-    config = {"type": "custom:haeo-topology-card", "hub_entry_id": _hub_entry_id(hass)}
+    config = {"type": "custom:haeo-homusman-topology-card", "hub_entry_id": _hub_entry_id(hass)}
     _render_card(
         page,
         hass,
         ctx,
-        tag="haeo-topology-card",
+        tag="haeo-homusman-topology-card",
         config=config,
         entity_filter=lambda _entity_id, attributes: "topology" in attributes,
         step=step,

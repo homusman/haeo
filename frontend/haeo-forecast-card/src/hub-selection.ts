@@ -11,7 +11,7 @@ function isTopologyAttribute(value: unknown): boolean {
 }
 
 function isHaeoEntity(hass: HassLike, entityId: string, entry: NonNullable<HassLike["entities"]>[string]): boolean {
-  if (entry?.platform === "haeo") {
+  if (entry?.platform === "haeo_homusman") {
     return true;
   }
   const state = hass.states[entityId];
@@ -31,7 +31,7 @@ function isHaeoEntity(hass: HassLike, entityId: string, entry: NonNullable<HassL
   if (isTopologyAttribute(attrs["topology"])) {
     return true;
   }
-  return attrs["platform"] === "haeo";
+  return attrs["platform"] === "haeo_homusman";
 }
 
 function deviceConfigEntryIds(hass: HassLike, deviceId: string): string[] {

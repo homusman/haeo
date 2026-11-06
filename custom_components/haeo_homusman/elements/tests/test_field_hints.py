@@ -1,0 +1,167 @@
+"""Tests for elements.field_hints: list helpers and OutputType defaults."""
+
+from homeassistant.components.number.const import DEFAULT_MAX_VALUE, DEFAULT_MIN_VALUE
+
+from custom_components.haeo_homusman.core.model.const import OutputType
+from custom_components.haeo_homusman.core.schema.elements.grid import GridConfigSchema
+from custom_components.haeo_homusman.core.schema.field_hints import FieldHint, ListFieldHints, calendar_input, extract_field_hints
+from custom_components.haeo_homusman.core.schema.sections import CONF_PRICE_SOURCE_TARGET, SECTION_PRICING
+from custom_components.haeo_homusman.elements import config_field_path, iter_input_field_paths
+from custom_components.haeo_homusman.elements.input_fields import is_number_field_info
+from custom_components.haeo_homusman.elements.field_hints import (
+    OUTPUT_TYPE_DEFAULTS,
+    PRICE_NATIVE_MAX_VALUE,
+    PRICE_NATIVE_MIN_VALUE,
+    build_input_fields,
+    build_list_input_fields,
+)
+
+
+def test_build_list_input_fields_generates_per_item_sections() -> None:
+    """Each list item with hinted fields gets its own section keyed by index."""
+    hints = ListFieldHints(fields={"price": FieldHint(output_type=OutputType.PRICE, time_series=True)})
+    items = [{"name": "solar", "price": 0.05}, {"name": "grid", "price": 0.30}]
+
+    result = build_list_input_fields("policy", "rules", hints, items)
+
+    assert "rules.0" in result
+    assert "rules.1" in result
+    assert "price" in result["rules.0"]
+    assert result["rules.0"]["price"].output_type == OutputType.PRICE
+    assert result["rules.0"]["price"].time_series is True
+    assert result["rules.0"]["price"].entity_description.translation_key == "policy_price"
+
+
+def test_build_list_input_fields_creates_entities_for_all_items() -> None:
+    """All items get entities for hinted fields, even when absent from config."""
+    hints = ListFieldHints(fields={"price": FieldHint(output_type=OutputType.PRICE)})
+    items = [{"name": "solar"}, {"name": "grid", "price": 0.30}]
+
+    result = build_list_input_fields("policy", "rules", hints, items)
+
+    assert "rules.0" in result
+    assert "price" in result["rules.0"]
+    assert "rules.1" in result
+    assert "price" in result["rules.1"]
+
+
+def test_build_list_input_fields_empty_list() -> None:
+    """Empty item list produces empty result."""
+    hints = ListFieldHints(fields={"price": FieldHint(output_type=OutputType.PRICE)})
+
+    result = build_list_input_fields("policy", "rules", hints, [])
+
+    assert result == {}
+
+
+def test_build_list_input_fields_skips_non_mapping_items() -> None:
+    """Non-mapping items in the list are skipped."""
+    hints = ListFieldHints(fields={"price": FieldHint(output_type=OutputType.PRICE)})
+    items: object = ["not_a_dict", {"name": "grid", "price": 0.30}]
+
+    result = build_list_input_fields("policy", "rules", hints, items)
+
+    assert "rules.0" not in result
+    assert "rules.1" in result
+
+
+def test_build_list_input_fields_status_output_type() -> None:
+    """STATUS output type produces SwitchEntityDescription."""
+    hints = ListFieldHints(fields={"enabled": FieldHint(output_type=OutputType.STATUS)})
+    items = [{"enabled": True}]
+
+    result = build_list_input_fields("policy", "rules", hints, items)
+
+    assert "rules.0" in result
+    info = result["rules.0"]["enabled"]
+    assert info.output_type == OutputType.STATUS
+    assert type(info.entity_description).__name__ == "SwitchEntityDescription"
+
+
+def test_build_list_input_fields_creates_entity_for_absent_fields() -> None:
+    """Hinted fields absent from config items still get entities with defaults."""
+    hints = ListFieldHints(
+        fields={
+            "enabled": FieldHint(output_type=OutputType.STATUS, default_value=True),
+            "price": FieldHint(output_type=OutputType.PRICE),
+        }
+    )
+    # Item has price but not enabled — both should get entities
+    items = [{"price": {"type": "constant", "value": 0.1}}]
+
+    result = build_list_input_fields("policy", "rules", hints, items)
+
+    assert "rules.0" in result
+    assert "enabled" in result["rules.0"]
+    assert "price" in result["rules.0"]
+    assert result["rules.0"]["enabled"].output_type == OutputType.STATUS
+
+
+def test_price_output_type_defaults_are_explicit_negative_compatible() -> None:
+    """PRICE fields must not rely on HA NumberEntityDescription None → min/max defaults.
+
+    Home Assistant maps native_min_value/native_max_value of None to 0.0 and 100.0,
+    which incorrectly forbids negative prices and caps above 100.
+    """
+    meta = OUTPUT_TYPE_DEFAULTS[OutputType.PRICE]
+    assert meta.min_value is not None
+    assert meta.max_value is not None
+    assert meta.min_value == PRICE_NATIVE_MIN_VALUE
+    assert meta.max_value == PRICE_NATIVE_MAX_VALUE
+    assert meta.min_value < 0
+    assert meta.min_value != DEFAULT_MIN_VALUE
+    assert meta.max_value != DEFAULT_MAX_VALUE
+
+
+def test_grid_pricing_fields_use_explicit_price_bounds() -> None:
+    """Built grid pricing inputs expose explicit native min/max on the description."""
+    hints = extract_field_hints(GridConfigSchema)
+    fields = build_input_fields("grid", hints)
+    field_info = fields[SECTION_PRICING][CONF_PRICE_SOURCE_TARGET]
+    assert is_number_field_info(field_info)
+    desc = field_info.entity_description
+    assert desc.native_min_value == PRICE_NATIVE_MIN_VALUE
+    assert desc.native_max_value == PRICE_NATIVE_MAX_VALUE
+
+
+def test_build_input_fields_translation_key_combines_element_type_and_field_name() -> None:
+    """Section field translation keys are the element type joined to the field name."""
+    fields = build_input_fields("grid", extract_field_hints(GridConfigSchema))
+
+    assert fields[SECTION_PRICING][CONF_PRICE_SOURCE_TARGET].entity_description.translation_key == ("grid_price_source_target")
+
+
+_TRIP_HINT = FieldHint(
+    output_type=OutputType.AVAILABILITY,
+    outputs={
+        "trip_away": calendar_input(OutputType.AVAILABILITY, "window_active"),
+        "trip_due": calendar_input(OutputType.ENERGY, "event_due"),
+    },
+)
+
+
+def test_field_with_outputs_feeds_an_input_per_output() -> None:
+    """A field with outputs keeps one config field and gets an input for each output, reading that field."""
+    fields = build_input_fields("ev", {"trip": {"trip_calendar": _TRIP_HINT}})
+
+    field_info = fields["trip"]["trip_calendar"]
+    assert field_info.outputs is not None
+    assert {name: output.source_field for name, output in field_info.outputs.items()} == {
+        "trip_away": "trip_calendar",
+        "trip_due": "trip_calendar",
+    }
+    assert field_info.outputs["trip_due"].entity_description.translation_key == "ev_trip_due"
+    assert field_info.outputs["trip_due"].boundaries
+    assert not field_info.outputs["trip_away"].boundaries
+
+    paths = iter_input_field_paths(fields)
+    assert [path for path, _info in paths] == [("trip", "trip_away"), ("trip", "trip_due")]
+    assert [config_field_path(path, info) for path, info in paths] == [("trip", "trip_calendar")] * 2
+
+
+def test_field_without_outputs_reads_its_own_path() -> None:
+    """An ordinary field is its own input and reads its own config path."""
+    fields = build_input_fields("grid", extract_field_hints(GridConfigSchema))
+
+    path, info = next((p, i) for p, i in iter_input_field_paths(fields) if p == (SECTION_PRICING, CONF_PRICE_SOURCE_TARGET))
+    assert config_field_path(path, info) == path

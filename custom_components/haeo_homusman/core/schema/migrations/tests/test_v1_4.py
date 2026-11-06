@@ -1,0 +1,453 @@
+"""Tests for the v1.4 schema migration."""
+
+from collections.abc import Mapping
+
+import pytest
+
+from custom_components.haeo_homusman.core.const import (
+    CONF_ELEMENT_TYPE,
+    CONF_HORIZON,
+    CONF_HORIZON_PRESET,
+    CONF_NAME,
+    HORIZON_PRESET_3_DAYS,
+    HORIZON_PRESET_5_DAYS,
+    HUB_SECTION_ADVANCED,
+    HUB_SECTION_COMMON,
+    HUB_SECTION_TIERS,
+)
+from custom_components.haeo_homusman.core.schema import (
+    as_connection_target,
+    as_constant_value,
+    as_entity_value,
+    as_none_value,
+    get_connection_target_name,
+)
+from custom_components.haeo_homusman.core.schema.elements import battery, buffer, connection, grid, junction, node
+from custom_components.haeo_homusman.core.schema.horizon_value import as_horizon_preset_value
+from custom_components.haeo_homusman.core.schema.migrations import battery_partitions as partitions
+from custom_components.haeo_homusman.core.schema.migrations.v1_4 import (
+    HubHorizonMigration,
+    junction_config,
+    migrate_connection_config,
+    migrate_hub_horizon,
+    migrate_participants,
+    node_becomes_junction,
+    node_is_junction,
+    predates_v1_4,
+)
+from custom_components.haeo_homusman.core.schema.sections import (
+    CONF_EFFICIENCY_SOURCE_TARGET,
+    CONF_EFFICIENCY_TARGET_SOURCE,
+    CONF_MAX_POWER_SOURCE_TARGET,
+    CONF_MAX_POWER_TARGET_SOURCE,
+    CONF_PRICE_SOURCE_TARGET,
+    CONF_PRICE_TARGET_SOURCE,
+    SECTION_EFFICIENCY,
+    SECTION_POWER_LIMITS,
+    SECTION_PRICING,
+)
+
+
+def _section(config: Mapping[str, object], key: str) -> Mapping[str, object]:
+    """Narrow a nested section value from migrated config for assertions."""
+    section = config[key]
+    assert isinstance(section, Mapping)
+    return section
+
+
+def _connection_config(**sections: object) -> dict[str, object]:
+    return {
+        CONF_ELEMENT_TYPE: connection.ELEMENT_TYPE,
+        CONF_NAME: "Inverter link",
+        connection.SECTION_ENDPOINTS: {
+            connection.CONF_SOURCE: as_connection_target("DC Bus"),
+            connection.CONF_TARGET: as_connection_target("AC Bus"),
+        },
+        **sections,
+    }
+
+
+def test_migrate_strips_segment_order() -> None:
+    """Segment order is removed from the forward connection."""
+    data = _connection_config(
+        segment_order={"mirror_segment_order": True},
+        power_limits={},
+        pricing={},
+        efficiency={},
+    )
+
+    forward, _ = migrate_connection_config(data, existing_names=set(), routes=set())
+
+    assert "segment_order" not in forward
+
+
+@pytest.mark.parametrize(
+    "reverse_power",
+    [
+        pytest.param({}, id="unset"),
+        pytest.param({CONF_MAX_POWER_TARGET_SOURCE: as_none_value()}, id="none"),
+    ],
+)
+def test_migrate_without_reverse_settings_creates_no_reverse(reverse_power: dict[str, object]) -> None:
+    """Reverse fields had no effect since connections became unidirectional, so unset ones create no reverse."""
+    data = _connection_config(
+        power_limits={CONF_MAX_POWER_SOURCE_TARGET: as_constant_value(10.0), **reverse_power},
+        pricing={},
+        efficiency={},
+    )
+
+    forward, reverse = migrate_connection_config(data, existing_names=set(), routes=set())
+
+    assert _section(forward, SECTION_POWER_LIMITS) == {CONF_MAX_POWER_SOURCE_TARGET: as_constant_value(10.0)}
+    assert reverse is None
+
+
+@pytest.mark.parametrize("zero", [0, 0.0], ids=["int", "float"])
+def test_migrate_zero_reverse_power_blocks_reverse(zero: float) -> None:
+    """A constant 0 reverse max power blocked reverse flow, so no reverse connection is created."""
+    data = _connection_config(
+        power_limits={
+            CONF_MAX_POWER_SOURCE_TARGET: as_constant_value(10.0),
+            CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(zero),
+        },
+        pricing={CONF_PRICE_TARGET_SOURCE: as_constant_value(0.2)},
+        efficiency={CONF_EFFICIENCY_TARGET_SOURCE: as_constant_value(0.9)},
+    )
+
+    forward, reverse = migrate_connection_config(data, existing_names=set(), routes=set())
+
+    assert reverse is None
+    assert _section(forward, SECTION_POWER_LIMITS) == {CONF_MAX_POWER_SOURCE_TARGET: as_constant_value(10.0)}
+    assert _section(forward, SECTION_PRICING) == {}
+    assert _section(forward, SECTION_EFFICIENCY) == {}
+
+
+def test_migrate_entity_reverse_power_creates_reverse() -> None:
+    """A sensor-driven reverse max power is carried to the reverse connection even if it may read 0."""
+    data = _connection_config(
+        power_limits={CONF_MAX_POWER_TARGET_SOURCE: as_entity_value(["sensor.reverse_limit"])},
+        pricing={},
+        efficiency={},
+    )
+
+    _, reverse = migrate_connection_config(data, existing_names=set(), routes=set())
+
+    assert reverse is not None
+    assert _section(reverse, SECTION_POWER_LIMITS) == {
+        CONF_MAX_POWER_SOURCE_TARGET: as_entity_value(["sensor.reverse_limit"]),
+    }
+
+
+def test_migrate_splits_reverse_fields() -> None:
+    """Reverse-direction fields become a second connection with swapped endpoints."""
+    data = _connection_config(
+        power_limits={
+            CONF_MAX_POWER_SOURCE_TARGET: as_constant_value(10.0),
+            CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(8.0),
+        },
+        pricing={
+            CONF_PRICE_SOURCE_TARGET: as_constant_value(0.1),
+            CONF_PRICE_TARGET_SOURCE: as_constant_value(0.2),
+        },
+        efficiency={
+            CONF_EFFICIENCY_SOURCE_TARGET: as_constant_value(0.95),
+            CONF_EFFICIENCY_TARGET_SOURCE: as_constant_value(0.90),
+        },
+    )
+
+    forward, reverse = migrate_connection_config(data, existing_names=set(), routes=set())
+
+    assert reverse is not None
+    assert forward[CONF_NAME] == "Inverter link"
+    assert CONF_MAX_POWER_TARGET_SOURCE not in _section(forward, SECTION_POWER_LIMITS)
+    assert reverse[CONF_NAME] == "Inverter link (AC Bus to DC Bus)"
+    assert _section(reverse, SECTION_POWER_LIMITS)[CONF_MAX_POWER_SOURCE_TARGET] == as_constant_value(8.0)
+    assert _section(reverse, SECTION_PRICING)[CONF_PRICE_SOURCE_TARGET] == as_constant_value(0.2)
+    assert _section(reverse, SECTION_EFFICIENCY)[CONF_EFFICIENCY_SOURCE_TARGET] == as_constant_value(0.90)
+    reverse_endpoints = reverse[connection.SECTION_ENDPOINTS]
+    assert isinstance(reverse_endpoints, dict)
+    assert get_connection_target_name(reverse_endpoints[connection.CONF_SOURCE]) == "AC Bus"
+    assert get_connection_target_name(reverse_endpoints[connection.CONF_TARGET]) == "DC Bus"
+
+
+def test_migrate_reverse_records_name() -> None:
+    """Reverse connection names avoid existing subentry titles, and the new name is recorded."""
+    data = _connection_config(
+        power_limits={CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(5.0)},
+        pricing={},
+        efficiency={},
+    )
+    existing_names = {"Inverter link", "Inverter link (AC Bus to DC Bus)"}
+    routes = {("DC Bus", "AC Bus")}
+
+    _, reverse = migrate_connection_config(data, existing_names=existing_names, routes=routes)
+
+    assert reverse is not None
+    assert reverse[CONF_NAME] == "Inverter link (AC Bus to DC Bus) 2"
+    assert existing_names == {"Inverter link", "Inverter link (AC Bus to DC Bus)", "Inverter link (AC Bus to DC Bus) 2"}
+    assert routes == {("DC Bus", "AC Bus")}
+
+
+def test_migrate_creates_no_reverse_where_another_connection_carries_it() -> None:
+    """A connection already carrying power the other way keeps doing so, so the reverse settings are dropped."""
+    data = _connection_config(
+        power_limits={CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(5.0)},
+        pricing={CONF_PRICE_TARGET_SOURCE: as_constant_value(0.2)},
+        efficiency={},
+    )
+    existing_names = {"Inverter link", "Charger"}
+    routes = {("DC Bus", "AC Bus"), ("AC Bus", "DC Bus")}
+
+    forward, reverse = migrate_connection_config(data, existing_names=existing_names, routes=routes)
+
+    assert reverse is None
+    assert _section(forward, SECTION_POWER_LIMITS) == {}
+    assert _section(forward, SECTION_PRICING) == {}
+    assert existing_names == {"Inverter link", "Charger"}
+    assert routes == {("DC Bus", "AC Bus"), ("AC Bus", "DC Bus")}
+
+
+def test_migrate_gives_parallel_connections_their_own_reverse() -> None:
+    """Reverse connections the migration creates do not count as connections already carrying power the other way."""
+    data = _connection_config(
+        power_limits={CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(5.0)},
+        pricing={},
+        efficiency={},
+    )
+    existing_names = {"Inverter link", "Inverter link 2"}
+    routes = {("DC Bus", "AC Bus")}
+
+    _, first = migrate_connection_config(data, existing_names=existing_names, routes=routes)
+    _, second = migrate_connection_config(
+        {**data, CONF_NAME: "Inverter link 2"}, existing_names=existing_names, routes=routes
+    )
+
+    assert first is not None
+    assert second is not None
+    assert first[CONF_NAME] == "Inverter link (AC Bus to DC Bus)"
+    assert second[CONF_NAME] == "Inverter link 2 (AC Bus to DC Bus)"
+
+
+def test_migrate_self_loop_is_not_its_own_reverse() -> None:
+    """A connection from an element to itself does not count as already carrying its own reverse flow."""
+    data = _connection_config(
+        power_limits={CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(5.0)},
+        pricing={},
+        efficiency={},
+    )
+    data[connection.SECTION_ENDPOINTS] = {
+        connection.CONF_SOURCE: as_connection_target("AC Bus"),
+        connection.CONF_TARGET: as_connection_target("AC Bus"),
+    }
+
+    _, reverse = migrate_connection_config(data, existing_names={"Inverter link"}, routes={("AC Bus", "AC Bus")})
+
+    assert reverse is not None
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"),
+    [
+        pytest.param(None, True, id="no_role"),
+        pytest.param({"is_source": False, "is_sink": False}, True, id="plain_false"),
+        pytest.param({"is_source": as_constant_value(False), "is_sink": as_none_value()}, True, id="constant_false"),
+        pytest.param({"is_source": True, "is_sink": False}, False, id="plain_source"),
+        pytest.param({"is_source": False, "is_sink": as_constant_value(True)}, False, id="constant_sink"),
+        pytest.param({"is_source": as_entity_value(["switch.source"])}, False, id="entity_driven"),
+    ],
+)
+def test_node_is_junction(role: dict[str, object] | None, expected: bool) -> None:
+    """A node is a junction only when no role field is on or driven by an entity."""
+    data: dict[str, object] = {CONF_ELEMENT_TYPE: node.ELEMENT_TYPE, CONF_NAME: "Switchboard"}
+    if role is not None:
+        data[node.SECTION_ROLE] = role
+
+    assert node_is_junction(data) is expected
+
+
+def test_junction_config_keeps_only_the_name() -> None:
+    """The junction replacing a node keeps its name and drops the role."""
+    data = {CONF_ELEMENT_TYPE: node.ELEMENT_TYPE, CONF_NAME: "Switchboard", node.SECTION_ROLE: {"is_source": False}}
+
+    assert junction_config(data) == {CONF_ELEMENT_TYPE: junction.ELEMENT_TYPE, CONF_NAME: "Switchboard"}
+
+
+@pytest.mark.parametrize(
+    ("stored_preset", "expected_preset", "tiers_replaced_by"),
+    [
+        pytest.param(HORIZON_PRESET_3_DAYS, HORIZON_PRESET_3_DAYS, None, id="preset_kept"),
+        pytest.param("custom", HORIZON_PRESET_5_DAYS, HORIZON_PRESET_5_DAYS, id="custom_tiers_use_default"),
+        pytest.param(None, HORIZON_PRESET_5_DAYS, None, id="no_preset_uses_default"),
+    ],
+)
+def test_migrate_hub_horizon_from_preset(
+    stored_preset: str | None, expected_preset: str, tiers_replaced_by: str | None
+) -> None:
+    """The horizon preset becomes a horizon choice, and custom tiers are reported replaced by the default preset."""
+    common: dict[str, object] = {CONF_NAME: "Hub"}
+    if stored_preset is not None:
+        common[CONF_HORIZON_PRESET] = stored_preset
+    data = {HUB_SECTION_COMMON: common, HUB_SECTION_TIERS: {"tier_1_count": 5}, HUB_SECTION_ADVANCED: {}}
+
+    assert migrate_hub_horizon(data) == HubHorizonMigration(
+        {
+            HUB_SECTION_COMMON: {CONF_NAME: "Hub", CONF_HORIZON: as_horizon_preset_value(expected_preset)},
+            HUB_SECTION_ADVANCED: {},
+        },
+        tiers_replaced_by,
+    )
+
+
+def test_migrate_hub_horizon_keeps_existing_horizon() -> None:
+    """A hub that already chose a horizon keeps it, whatever preset it still stores."""
+    horizon = as_entity_value(["input_select.horizon"])
+    data = {
+        HUB_SECTION_COMMON: {CONF_NAME: "Hub", CONF_HORIZON: horizon, CONF_HORIZON_PRESET: "custom"},
+        HUB_SECTION_ADVANCED: {},
+    }
+
+    assert migrate_hub_horizon(data) == HubHorizonMigration(
+        {HUB_SECTION_COMMON: {CONF_NAME: "Hub", CONF_HORIZON: horizon}, HUB_SECTION_ADVANCED: {}},
+        None,
+    )
+
+
+def _node(name: str, *, is_source: bool) -> dict[str, object]:
+    return {
+        CONF_ELEMENT_TYPE: node.ELEMENT_TYPE,
+        CONF_NAME: name,
+        node.SECTION_ROLE: {"is_source": as_constant_value(is_source), "is_sink": as_constant_value(False)},
+    }
+
+
+@pytest.mark.parametrize(
+    ("name", "is_source", "advanced_mode", "expected"),
+    [
+        pytest.param("Bus", False, True, True, id="plain_node_in_advanced_mode"),
+        pytest.param("Bus", True, True, False, id="source_node_in_advanced_mode"),
+        pytest.param("Bus", True, False, True, id="source_node_outside_advanced_mode"),
+        pytest.param("Switchboard", True, True, True, id="switchboard_is_always_a_junction"),
+    ],
+)
+def test_node_becomes_junction(name: str, is_source: bool, advanced_mode: bool, expected: bool) -> None:
+    """A node is replaced by a junction unless advanced mode keeps a node that sources or sinks power."""
+    assert node_becomes_junction(name, _node(name, is_source=is_source), advanced_mode=advanced_mode) is expected
+
+
+def test_migrate_participants_applies_every_element_step() -> None:
+    """Connections split, batteries gain buffers, nodes become junctions, and other elements pass through."""
+    link = _connection_config(**{SECTION_POWER_LIMITS: {CONF_MAX_POWER_TARGET_SOURCE: as_constant_value(5.0)}})
+    battery_config: dict[str, object] = {
+        CONF_ELEMENT_TYPE: battery.ELEMENT_TYPE,
+        CONF_NAME: "Battery",
+        "connection": as_connection_target("DC Bus"),
+        "storage": {"capacity": as_constant_value(10.0)},
+        "limits": {"min_charge_percentage": as_constant_value(10.0)},
+        "undercharge": {"percentage": as_constant_value(5.0), "cost": as_constant_value(0.03)},
+    }
+    grid_config: dict[str, object] = {CONF_ELEMENT_TYPE: grid.ELEMENT_TYPE, CONF_NAME: "Grid"}
+
+    migration = migrate_participants(
+        {
+            "Battery": battery_config,
+            "Inverter link": link,
+            "DC Bus": _node("DC Bus", is_source=False),
+            "Grid": grid_config,
+        },
+        advanced_mode=False,
+    )
+
+    assert list(migration.participants) == [
+        "Battery",
+        "Battery reserve",
+        "Inverter link",
+        "Inverter link (AC Bus to DC Bus)",
+        "DC Bus",
+        "Grid",
+    ]
+    assert migration.created_from == {
+        "Inverter link (AC Bus to DC Bus)": "Inverter link",
+        "Battery reserve": "Battery",
+    }
+    assert migration.junctions == ("DC Bus",)
+    assert _section(migration.participants["Inverter link (AC Bus to DC Bus)"], SECTION_POWER_LIMITS) == {
+        CONF_MAX_POWER_SOURCE_TARGET: as_constant_value(5.0)
+    }
+    assert "undercharge" not in migration.participants["Battery"]
+    assert migration.participants["Battery reserve"][CONF_ELEMENT_TYPE] == buffer.ELEMENT_TYPE
+    assert migration.participants["DC Bus"] == {CONF_ELEMENT_TYPE: junction.ELEMENT_TYPE, CONF_NAME: "DC Bus"}
+    assert migration.participants["Grid"] == grid_config
+
+
+@pytest.mark.parametrize(
+    ("advanced_mode", "junctions"),
+    [
+        pytest.param(True, ("Switchboard",), id="advanced_mode_keeps_source_nodes"),
+        pytest.param(False, ("Switchboard", "Generator bus"), id="every_node_outside_advanced_mode"),
+    ],
+)
+def test_migrate_participants_replaces_nodes_by_mode(advanced_mode: bool, junctions: tuple[str, ...]) -> None:
+    """Advanced mode keeps nodes that source or sink power, except the Switchboard."""
+    migration = migrate_participants(
+        {
+            "Switchboard": _node("Switchboard", is_source=True),
+            "Generator bus": _node("Generator bus", is_source=True),
+        },
+        advanced_mode=advanced_mode,
+    )
+
+    assert migration.junctions == junctions
+    assert migration.created_from == {}
+
+
+_CURRENT_HUB: dict[str, object] = {
+    HUB_SECTION_COMMON: {CONF_NAME: "Home", CONF_HORIZON: as_horizon_preset_value(HORIZON_PRESET_5_DAYS)}
+}
+_CURRENT_BATTERY: dict[str, object] = {
+    CONF_ELEMENT_TYPE: battery.ELEMENT_TYPE,
+    CONF_NAME: "Battery",
+    battery.SECTION_STORAGE: {},
+    battery.SECTION_ADVANCED: {battery.CONF_CHARGE_LIMIT_COST: as_constant_value(100.0)},
+}
+
+
+@pytest.mark.parametrize(
+    ("hub", "participants", "expected"),
+    [
+        pytest.param(_CURRENT_HUB, [_CURRENT_BATTERY], False, id="current"),
+        pytest.param(
+            {HUB_SECTION_COMMON: {CONF_NAME: "Home", CONF_HORIZON_PRESET: HORIZON_PRESET_5_DAYS}},
+            [_CURRENT_BATTERY],
+            True,
+            id="horizon_preset",
+        ),
+        pytest.param({**_CURRENT_HUB, HUB_SECTION_TIERS: {}}, [_CURRENT_BATTERY], True, id="tiers"),
+        pytest.param(
+            _CURRENT_HUB,
+            [{**_CURRENT_BATTERY, partitions.SECTION_PARTITIONING: {partitions.CONF_CONFIGURE_PARTITIONS: False}}],
+            True,
+            id="battery_partitions",
+        ),
+        pytest.param(
+            _CURRENT_HUB,
+            [{key: value for key, value in _CURRENT_BATTERY.items() if key != battery.SECTION_ADVANCED}],
+            True,
+            id="missing_charge_limit_cost",
+        ),
+        pytest.param(
+            _CURRENT_HUB,
+            [
+                {
+                    CONF_ELEMENT_TYPE: node.ELEMENT_TYPE,
+                    CONF_NAME: "Switchboard",
+                    node.SECTION_ROLE: {node.CONF_IS_SOURCE: as_constant_value(True)},
+                }
+            ],
+            False,
+            id="node_alone_is_not_a_marker",
+        ),
+    ],
+)
+def test_predates_v1_4(hub: Mapping[str, object], participants: list[Mapping[str, object]], *, expected: bool) -> None:
+    """A hub without a horizon choice, or a battery with partitions or no charge limit cost, predates v1.4."""
+    assert predates_v1_4(hub, participants) is expected

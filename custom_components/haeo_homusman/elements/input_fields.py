@@ -1,0 +1,183 @@
+"""Input field metadata for creating input entities.
+
+Defines which config fields should become input entities (NumberEntity/SwitchEntity)
+and their associated metadata like output type, direction, and time series behavior.
+"""
+
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from typing import Literal, TypeGuard, overload
+
+from homeassistant.components.number import NumberEntityDescription
+from homeassistant.components.switch import SwitchEntityDescription
+
+from custom_components.haeo_homusman.core.data.util.field_units import has_field_unit
+from custom_components.haeo_homusman.core.model.const import OutputType
+from custom_components.haeo_homusman.core.schema.field_hints import CalendarFieldHint, MeterFieldHint
+from custom_components.haeo_homusman.core.units import localize_currency
+
+
+@dataclass(frozen=True, slots=True)
+class FieldSchemaInfo:
+    """Schema metadata for a config field."""
+
+    value_type: object
+    is_optional: bool
+
+
+@dataclass(frozen=True, slots=True)
+class InputFieldDefaults:
+    """Default pre-selection behavior for config flow fields.
+
+    Attributes:
+        mode: Controls what is pre-selected in step 1:
+            - 'entity': Pre-select the entity specified in `entity`
+            - 'value': Pre-select the HAEO Configurable sentinel entity
+            - None: No pre-selection (empty)
+        entity: Entity ID to pre-select when mode='entity'
+        value: Value to pre-fill in step 2 when mode='value'
+
+    Note:
+        When mode='value', step 2 is always Required. The value is only
+        used for pre-filling the form, not as a fallback. If the user
+        clears step 1 selection, the field is omitted from config.
+
+    """
+
+    mode: Literal["entity", "value"] | None = None
+    entity: str | None = None
+    value: float | bool | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InputFieldInfo[T: (NumberEntityDescription, SwitchEntityDescription)]:
+    """Metadata for a config field that becomes an input entity.
+
+    Attributes:
+        field_name: The key in the element's ConfigSchema
+        entity_description: Home Assistant entity description (Number or Switch)
+        output_type: OutputType enum value for categorization and unit spec lookup
+        direction: "+" or "-" for power direction attributes
+        time_series: Whether this field is time series (list) or scalar
+        boundaries: Whether time series values are at boundaries (n+1 values) vs intervals (n values)
+        defaults: Default pre-selection behavior for config flow fields
+        calendar: When set, the input resolves its values from the events of the
+            calendars it reads
+        outputs: When set, the config field feeds these inputs instead of being
+            an input itself, keyed by their field names
+        source_field: For an input fed by another config field, that field's name
+        meter: When set, the field reads meters, so it only offers sensors whose
+            recorded statistics keep a running total
+
+    Note:
+        Whether a field is optional (can be disabled in config flow) is determined
+        by the element's ConfigSchema TypedDict using NotRequired. Use the TypedDict's
+        __optional_keys__ attribute to check if a field_name is optional.
+
+    """
+
+    field_name: str
+    entity_description: T
+    output_type: OutputType
+    direction: str | None = None
+    time_series: bool = False
+    boundaries: bool = False
+    defaults: InputFieldDefaults | None = None
+    # Force value to be required, even if its optional in the schema
+    force_required: bool | None = None
+    calendar: CalendarFieldHint | None = None
+    outputs: "Mapping[str, AnyInputFieldInfo] | None" = None
+    source_field: str | None = None
+    meter: MeterFieldHint | None = None
+
+
+# Union of the two concrete field-info instantiations; use when handling
+# heterogeneous fields (the TypeVar is constrained to exactly these two).
+type AnyInputFieldInfo = InputFieldInfo[NumberEntityDescription] | InputFieldInfo[SwitchEntityDescription]
+
+type InputFieldSection = Mapping[str, AnyInputFieldInfo]
+
+
+def is_number_field_info(field_info: AnyInputFieldInfo) -> TypeGuard[InputFieldInfo[NumberEntityDescription]]:
+    """Narrow a heterogeneous InputFieldInfo to the NumberEntityDescription variant.
+
+    Uses a class-name check rather than isinstance: Home Assistant's frozen
+    dataclass compatibility shim generates entity description classes at
+    runtime, so isinstance against the imported class does not reliably hold.
+    """
+    return type(field_info.entity_description).__name__ == "NumberEntityDescription"
+
+
+def reads_calendar(field_info: AnyInputFieldInfo) -> bool:
+    """Return True when a config field feeds inputs resolved from calendar events, so it picks only calendars."""
+    return bool(field_info.outputs) and any(output.calendar is not None for output in field_info.outputs.values())
+
+
+def accepts_calendar_forecast(field_info: AnyInputFieldInfo) -> bool:
+    """Return True when a field can read a calendar as a forecast.
+
+    A number forecast field with a unit reads a calendar's events as a
+    stepped forecast of the value each event holds, typed with its unit.
+    """
+    return (
+        field_info.time_series
+        and field_info.outputs is None
+        and has_field_unit(field_info.output_type)
+        and is_number_field_info(field_info)
+    )
+
+
+def is_switch_field_info(field_info: AnyInputFieldInfo) -> TypeGuard[InputFieldInfo[SwitchEntityDescription]]:
+    """Narrow a heterogeneous InputFieldInfo to the SwitchEntityDescription variant.
+
+    See is_number_field_info for why this is a class-name check.
+    """
+    return type(field_info.entity_description).__name__ == "SwitchEntityDescription"
+
+
+type InputFieldGroups = Mapping[str, InputFieldSection]
+type InputFieldPath = tuple[str, ...]
+
+
+@overload
+def localize_input_field(
+    field_info: InputFieldInfo[NumberEntityDescription], currency_symbol: str
+) -> InputFieldInfo[NumberEntityDescription]: ...
+
+
+@overload
+def localize_input_field(field_info: AnyInputFieldInfo, currency_symbol: str) -> AnyInputFieldInfo: ...
+
+
+def localize_input_field(field_info: AnyInputFieldInfo, currency_symbol: str) -> AnyInputFieldInfo:
+    """Return the field with the ``$`` placeholder in its unit replaced by a currency symbol."""
+    if not is_number_field_info(field_info):
+        return field_info
+    description = field_info.entity_description
+    unit = localize_currency(description.native_unit_of_measurement, currency_symbol)
+    if unit == description.native_unit_of_measurement:
+        return field_info
+    return replace(field_info, entity_description=replace(description, native_unit_of_measurement=unit))
+
+
+def localize_input_fields(groups: InputFieldGroups, currency_symbol: str) -> InputFieldGroups:
+    """Return the field groups with every monetary unit shown in the given currency symbol."""
+    return {
+        section: {name: localize_input_field(info, currency_symbol) for name, info in fields.items()}
+        for section, fields in groups.items()
+    }
+
+
+__all__ = [
+    "AnyInputFieldInfo",
+    "FieldSchemaInfo",
+    "InputFieldDefaults",
+    "InputFieldGroups",
+    "InputFieldInfo",
+    "InputFieldPath",
+    "InputFieldSection",
+    "is_number_field_info",
+    "is_switch_field_info",
+    "localize_input_field",
+    "localize_input_fields",
+]

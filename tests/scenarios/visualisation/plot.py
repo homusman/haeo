@@ -41,7 +41,7 @@ def create_card_visualization(
 
     """
     repo_root = Path(__file__).resolve().parent.parent.parent.parent
-    script = repo_root / "frontend" / "haeo-forecast-card" / "scripts" / "export-scenario-svg.mjs"
+    script = repo_root / "frontend" / "haeo-homusman-forecast-card" / "scripts" / "export-scenario-svg.mjs"
 
     if not script.exists():
         msg = f"Card export script not found: {script}"
@@ -92,15 +92,15 @@ def create_topology_visualization(
 
     """
     repo_root = Path(__file__).resolve().parent.parent.parent.parent
-    script = repo_root / "frontend" / "haeo-forecast-card" / "scripts" / "export-topology-svg.mjs"
+    script = repo_root / "frontend" / "haeo-homusman-forecast-card" / "scripts" / "export-topology-svg.mjs"
 
     if not script.exists():
         msg = f"Topology export script not found: {script}"
         raise RuntimeError(msg)
 
-    bundle = repo_root / "frontend" / "haeo-forecast-card" / "dist" / "render-topology-svg.mjs"
+    bundle = repo_root / "frontend" / "haeo-homusman-forecast-card" / "dist" / "render-topology-svg.mjs"
     if not bundle.exists():
-        msg = f"Topology bundle not found: {bundle} — run: npm --prefix frontend/haeo-forecast-card run build"
+        msg = f"Topology bundle not found: {bundle} — run: npm --prefix frontend/haeo-homusman-forecast-card run build"
         raise RuntimeError(msg)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:

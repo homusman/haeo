@@ -5,7 +5,7 @@ import type { HassLike } from "./series";
 import { withSingleHubRegistry } from "./fixtures/scenarioOutputs";
 
 const smokeConfig = {
-  type: "custom:haeo-forecast-card" as const,
+  type: "custom:haeo-homusman-forecast-card" as const,
   hub_entry_id: "hub-alpha",
   entities: ["sensor.haeo_grid_import_power"],
 };
@@ -68,7 +68,7 @@ describe("ForecastCardController", () => {
     document.body.appendChild(host);
     const controller = new ForecastCardController(host, 1);
 
-    controller.setConfig({ type: "custom:haeo-forecast-card" });
+    controller.setConfig({ type: "custom:haeo-homusman-forecast-card" });
     controller.setHass(null);
     controller.connected();
 

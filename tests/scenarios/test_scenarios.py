@@ -11,8 +11,8 @@ from homeassistant.helpers.event import EventStateChangedData, async_track_state
 import pytest
 from syrupy.assertion import SnapshotAssertion
 
-from custom_components.haeo.const import OUTPUT_NAME_OPTIMIZATION_STATUS
-from custom_components.haeo.sensor_utils import get_output_sensors
+from custom_components.haeo_homusman.const import OUTPUT_NAME_OPTIMIZATION_STATUS
+from custom_components.haeo_homusman.sensor_utils import get_output_sensors
 from tests.scenarios.conftest import ScenarioData
 from tests.scenarios.visualization import visualize_scenario_results
 from tools.sim_hass import setup_haeo_entry

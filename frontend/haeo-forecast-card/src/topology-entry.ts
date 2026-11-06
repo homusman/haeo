@@ -14,7 +14,7 @@ declare global {
 
 window.customCards ??= [];
 window.customCards.push({
-  type: "haeo-topology-card",
+  type: "haeo-homusman-topology-card",
   name: "HAEO Network Topology Card",
   description: "Interactive SVG graph of the HAEO optimization network.",
   documentationURL:

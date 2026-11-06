@@ -1,0 +1,163 @@
+"""Simplified sensor implementation for HAEO outputs."""
+
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.const import PERCENTAGE
+from homeassistant.core import callback
+from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.typing import StateType
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from custom_components.haeo_homusman.const import CONF_RECORD_FORECASTS
+from custom_components.haeo_homusman.coordinator import CoordinatorOutput, ForecastPoint, HaeoDataUpdateCoordinator
+from custom_components.haeo_homusman.core.model import OutputType
+from custom_components.haeo_homusman.elements import ElementDeviceName, ElementOutputName
+from custom_components.haeo_homusman.entities.plot_metadata import SOURCE_ROLE_KEY, SOURCE_ROLE_OUTPUT
+
+# Attributes to exclude from recorder when forecast recording is disabled
+FORECAST_UNRECORDED_ATTRIBUTES: frozenset[str] = frozenset({"forecast"})
+
+
+def output_attributes(
+    element_title: str, element_type: str, output_name: str, field_type: OutputType
+) -> dict[str, object]:
+    """Return the attributes every HAEO output sensor carries, which the frontend cards read."""
+    return {
+        "element_name": element_title,
+        "element_type": element_type,
+        "output_name": output_name,
+        "field_type": field_type,
+        SOURCE_ROLE_KEY: SOURCE_ROLE_OUTPUT,
+        "advanced": False,
+    }
+
+
+class HaeoSensor(CoordinatorEntity[HaeoDataUpdateCoordinator], SensorEntity):
+    """Sensor exposing optimization outputs for HAEO elements and network."""
+
+    _attr_should_poll = False
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: HaeoDataUpdateCoordinator,
+        device_entry: DeviceEntry,
+        *,
+        subentry_key: str,
+        device_key: ElementDeviceName,
+        element_title: str,
+        element_type: str,
+        output_name: ElementOutputName,
+        output_data: CoordinatorOutput,
+        unique_id: str,
+        translation_placeholders: dict[str, str] | None = None,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+
+        self.device_entry = device_entry
+
+        self._subentry_key: str = subentry_key
+        self._device_key: ElementDeviceName = device_key
+        self._element_title: str = element_title
+        self._element_type: str = element_type
+        self._output_name: ElementOutputName = output_name
+        self._output_type: OutputType = output_data.type
+
+        # Use entity description for static field-derived attributes
+        self.entity_description = SensorEntityDescription(
+            key=output_name,
+            translation_key=output_name,
+        )
+
+        self._attr_unique_id = unique_id
+        if translation_placeholders is not None:
+            self._attr_translation_placeholders = translation_placeholders
+        # Outputs flagged advanced are LP-internal diagnostics (e.g. battery
+        # aggregate energy flows, SOC envelope bounds) that change at every
+        # optimisation tick. Disable them in the entity registry so the
+        # recorder doesn't track them by default; advanced users can enable
+        # individually if they want to see them.
+        self._attr_entity_registry_enabled_default = not output_data.advanced
+        self._apply_output(output_data)
+
+        self._record_forecasts = coordinator.config_entry.data.get(CONF_RECORD_FORECASTS, False)
+
+    @property
+    def available(self) -> bool:  # pyright: ignore[reportIncompatibleVariableOverride]  # Entity declares available as a cached_property
+        """Return if sensor is available based on coordinator success."""
+        return super().available and self.coordinator.last_update_success
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updates from the coordinator."""
+
+        attributes = output_attributes(self._element_title, self._element_type, self._output_name, self._output_type)
+        native_value: StateType | None = None
+
+        # Navigate the nested structure: subentry -> device -> outputs
+        subentry_devices = self.coordinator.data.outputs.get(self._subentry_key) if self.coordinator.data else None
+        outputs = subentry_devices.get(self._device_key) if subentry_devices else None
+        if outputs:
+            output_data = outputs.get(self._output_name)
+            if output_data is not None:
+                self._output_type = output_data.type
+                attributes["field_type"] = self._output_type
+                if output_data.direction is not None:
+                    attributes["direction"] = output_data.direction
+                if output_data.priority is not None:
+                    attributes["priority"] = output_data.priority
+                attributes["advanced"] = output_data.advanced
+                if output_data.fixed:
+                    attributes["fixed"] = True
+                self._apply_output(output_data)
+                if output_data.state is not None:
+                    native_value = self._scale_percentage_state(output_data.unit, output_data.state)
+
+                if output_data.forecast:
+                    attributes["forecast"] = self._scale_percentage_forecast(output_data.unit, output_data.forecast)
+                if output_data.interpolation_mode is not None:
+                    attributes["interpolation_mode"] = output_data.interpolation_mode
+
+        self._attr_native_value = native_value
+        self._attr_extra_state_attributes = attributes
+        super()._handle_coordinator_update()
+
+    async def async_added_to_hass(self) -> None:
+        """Finalize setup when entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+        self._apply_recorder_attribute_filtering()
+        self._handle_coordinator_update()
+
+    def _apply_recorder_attribute_filtering(self) -> None:
+        """Apply recorder filtering to this entity's runtime state info."""
+        # Forecasts excluded unless explicitly opted in
+        if not self._record_forecasts:
+            self._state_info["unrecorded_attributes"] = FORECAST_UNRECORDED_ATTRIBUTES
+
+    def _apply_output(self, output: CoordinatorOutput) -> None:
+        """Apply device class, options, and unit metadata for an output."""
+        self._attr_native_value = output.state
+        self._attr_entity_category = output.entity_category
+        self._attr_native_unit_of_measurement = output.unit
+        self._attr_device_class = output.device_class
+        self._attr_state_class = output.state_class
+        self._attr_options = list(output.options) if output.options is not None else None
+        self._attr_suggested_display_precision = output.display_precision
+
+    @staticmethod
+    def _scale_percentage_state(unit: str | None, value: StateType) -> StateType:
+        if unit != PERCENTAGE or value is None:
+            return value
+        return float(value) * 100.0
+
+    @staticmethod
+    def _scale_percentage_forecast(
+        unit: str | None,
+        forecast: list[ForecastPoint],
+    ) -> list[ForecastPoint]:
+        if unit != PERCENTAGE:
+            return list(forecast)
+        return [{"time": point["time"], "value": float(point["value"]) * 100.0} for point in forecast]
+
+
+__all__ = ["HaeoSensor", "output_attributes"]

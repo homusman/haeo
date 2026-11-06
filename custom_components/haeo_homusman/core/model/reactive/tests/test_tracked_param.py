@@ -1,0 +1,379 @@
+"""Tests for TrackedParam descriptor and dict-style parameter access."""
+
+import numpy as np
+import pytest
+
+from custom_components.haeo_homusman.core.model.element import Element
+from custom_components.haeo_homusman.core.model.elements.node import Node
+from custom_components.haeo_homusman.core.model.linear import Rows
+from custom_components.haeo_homusman.core.model.reactive import TrackedParam, computed, constraint
+from custom_components.haeo_homusman.core.model.reactive.tracked_param import _values_equal
+from custom_components.haeo_homusman.core.model.solver import Solver
+
+
+def create_test_element[T: Element[str]](cls: type[T]) -> T:
+    """Create a test element instance with a fresh solver."""
+    solver = Solver()
+    solver.setOptionValue("output_flag", False)
+    return cls(name="test", periods=np.array([1.0]), solver=solver, output_names=frozenset())
+
+
+# Basic TrackedParam tests
+
+
+def test_tracked_param_set_and_get_value() -> None:
+    """Test basic value storage and retrieval."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+    elem.capacity = 10.0
+
+    assert elem.capacity == 10.0
+
+
+def test_tracked_param_set_initial_value_does_not_invalidate() -> None:
+    """Test that initial value set does not mark anything as invalidated."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+    elem.capacity = 10.0
+
+    # No constraints defined yet, no reactive state should exist
+    # This just verifies initial set doesn't cause issues
+    assert elem.capacity == 10.0
+
+
+def test_tracked_param_change_value_invalidates_dependents() -> None:
+    """Test that changing a value invalidates dependent constraints."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+        @constraint
+        def soc_constraint(self) -> Rows:
+            _ = self.capacity  # Access to establish dependency
+            return Rows.concat([])
+
+    elem = create_test_element(TestElement)
+    elem.capacity = 10.0
+
+    # Call constraint to establish dependency
+    elem.soc_constraint()
+
+    # Check state was created and dependency tracked
+    state = getattr(elem, "_reactive_state_soc_constraint", None)
+    assert state is not None
+    assert (elem, "capacity") in state["deps"]
+
+    # Change value
+    elem.capacity = 20.0
+
+    # Constraint should be invalidated
+    assert state["invalidated"]
+
+
+def test_tracked_param_same_value_does_not_invalidate() -> None:
+    """Test that setting the same value does not invalidate."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+        @constraint
+        def soc_constraint(self) -> Rows:
+            _ = self.capacity
+            return Rows.concat([])
+
+    elem = create_test_element(TestElement)
+    elem.capacity = 10.0
+    elem.soc_constraint()
+
+    # Get the state
+    state = getattr(elem, "_reactive_state_soc_constraint", None)
+    assert state is not None
+    assert not state["invalidated"]
+
+    # Set same value
+    elem.capacity = 10.0
+
+    # Should not be invalidated
+    assert not state["invalidated"]
+
+
+def test_tracked_param_class_access_returns_descriptor() -> None:
+    """Test accessing TrackedParam on class returns the descriptor."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    assert isinstance(TestElement.capacity, TrackedParam)
+
+
+# Dict-style access tests
+
+
+def test_dict_access_getitem_returns_tracked_param_value() -> None:
+    """Test that __getitem__ returns the current value of a TrackedParam."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+    elem.capacity = 42.0
+
+    assert elem["capacity"] == 42.0
+
+
+def test_dict_access_setitem_sets_tracked_param_value() -> None:
+    """Test that __setitem__ sets the value of a TrackedParam."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+    elem["capacity"] = 99.0
+
+    assert elem.capacity == 99.0
+
+
+def test_dict_access_setitem_triggers_invalidation() -> None:
+    """Test that __setitem__ triggers constraint invalidation like normal set."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+        @constraint
+        def my_constraint(self) -> Rows:
+            _ = self.capacity
+            return Rows.concat([])
+
+    elem = create_test_element(TestElement)
+    elem["capacity"] = 10.0
+    elem.my_constraint()  # Establish dependency
+
+    # Get the state
+    state = getattr(elem, "_reactive_state_my_constraint", None)
+    assert state is not None
+    assert not state["invalidated"]
+
+    # Set via __setitem__
+    elem["capacity"] = 20.0
+
+    # Constraint should be invalidated
+    assert state["invalidated"]
+
+
+def test_dict_access_getitem_unknown_key_raises_keyerror() -> None:
+    """Test that __getitem__ raises KeyError for unknown keys."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+
+    with pytest.raises(KeyError, match="unknown_param"):
+        _ = elem["unknown_param"]
+
+
+def test_dict_access_setitem_unknown_key_raises_keyerror() -> None:
+    """Test that __setitem__ raises KeyError for unknown keys."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+
+    with pytest.raises(KeyError, match="unknown_param"):
+        elem["unknown_param"] = 123
+
+
+def test_dict_access_getitem_index_raises_keyerror() -> None:
+    """An element without segments has nothing to look up by index."""
+    node = Node(name="node", periods=np.array([1.0]), solver=Solver())
+
+    with pytest.raises(KeyError, match="does not support indexed access"):
+        _ = node[0]
+
+
+def test_dict_access_setitem_read_only_attribute_raises_keyerror() -> None:
+    """A value fixed when the element is built cannot be set by name."""
+    node = Node(name="node", periods=np.array([1.0]), solver=Solver())
+
+    with pytest.raises(KeyError, match="is_source"):
+        node["is_source"] = False
+
+
+def test_dict_access_getitem_regular_attribute_returns_value() -> None:
+    """Test that __getitem__ returns values for regular attributes."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+
+    # 'name' is a regular attribute, not a TrackedParam
+    assert elem["name"] == "test"
+
+
+def _element[T: Element[str]](cls: type[T]) -> T:
+    solver = Solver()
+    solver.setOptionValue("output_flag", False)
+    return cls(name="test", periods=np.array([1.0]), solver=solver, output_names=frozenset())
+
+
+def test_computed_caches_none_result() -> None:
+    """A computed value of None is cached like any other value."""
+    calls = 0
+
+    class TestElement(Element[str]):
+        limit = TrackedParam[float | None]()
+
+        @computed
+        def scaled(self) -> float | None:
+            nonlocal calls
+            calls += 1
+            return None if self.limit is None else self.limit * 2
+
+    elem = _element(TestElement)
+    elem.limit = None
+    assert elem.scaled() is None
+    assert elem.scaled() is None
+    assert calls == 1
+
+    elem.limit = 3.0
+    assert elem.scaled() == 6.0
+    assert calls == 2
+
+
+def test_first_assignment_rebuilds_method_that_checked_is_set() -> None:
+    """A method that checked is_set before a parameter existed is rebuilt when it is first assigned."""
+
+    class TestElement(Element[str]):
+        limit = TrackedParam[float]()
+
+        @computed
+        def described(self) -> str:
+            return f"limit {self.limit}" if type(self).limit.is_set(self) else "no limit"
+
+    elem = _element(TestElement)
+    assert elem.described() == "no limit"
+
+    elem.limit = 4.0
+    assert elem.described() == "limit 4.0"
+
+
+def test_dependency_index_drops_keys_a_method_no_longer_reads() -> None:
+    """When a method stops reading a parameter, changing that parameter no longer invalidates it."""
+    calls = 0
+
+    class TestElement(Element[str]):
+        use_a = TrackedParam[bool]()
+        a = TrackedParam[float]()
+        b = TrackedParam[float]()
+
+        @computed
+        def value(self) -> float:
+            nonlocal calls
+            calls += 1
+            return self.a if self.use_a else self.b
+
+    elem = _element(TestElement)
+    elem.a = 1.0
+    elem.b = 2.0
+    elem.use_a = True
+    assert elem.value() == 1.0
+
+    elem.use_a = False
+    assert elem.value() == 2.0
+    assert calls == 2
+
+    elem.a = 5.0
+    assert elem.value() == 2.0
+    assert calls == 2
+
+
+# Unset parameters and value comparison
+
+
+def test_unset_raises_attribute_error() -> None:
+    """Test that accessing an unset TrackedParam raises AttributeError."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+
+    # Never set, should raise AttributeError
+    with pytest.raises(AttributeError):
+        _ = elem.capacity
+
+    # is_set should return False
+    assert not TestElement.capacity.is_set(elem)
+
+
+def test_is_set_returns_true_after_setting() -> None:
+    """Test that is_set returns True after setting a value."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+    assert not TestElement.capacity.is_set(elem)
+
+    elem.capacity = 10.0
+    assert TestElement.capacity.is_set(elem)
+    assert elem.capacity == 10.0
+
+
+def test_getitem_raises_for_unset_param() -> None:
+    """Test that __getitem__ raises AttributeError for unset TrackedParams."""
+
+    class TestElement(Element[str]):
+        capacity = TrackedParam[float]()
+
+    elem = create_test_element(TestElement)
+
+    # Accessing via __getitem__ should also raise AttributeError
+    with pytest.raises(AttributeError):
+        _ = elem["capacity"]
+    assert not TestElement.capacity.is_set(elem)
+
+
+def test_values_equal_handles_comparison_errors() -> None:
+    """Test _values_equal handles TypeError and ValueError in comparisons."""
+
+    # Test numpy array comparison that raises TypeError
+    # (e.g., arrays with incompatible shapes for certain operations)
+    class BadArray:
+        """Mock array that raises TypeError on comparison."""
+
+        def __eq__(self, other: object) -> bool:
+            msg = "Incompatible types"
+            raise TypeError(msg)
+
+        def __hash__(self) -> int:
+            return id(self)
+
+    assert not _values_equal(BadArray(), BadArray())
+
+    # Test standard equality that raises ValueError
+    class BadValue:
+        """Mock value that raises ValueError on comparison."""
+
+        def __eq__(self, other: object) -> bool:
+            msg = "Invalid comparison"
+            raise ValueError(msg)
+
+        def __hash__(self) -> int:
+            return id(self)
+
+    assert not _values_equal(BadValue(), BadValue())
+
+    # Test numpy array comparison that raises ValueError
+    # Arrays with object dtype that can't be compared
+    a = np.array([BadValue()], dtype=object)
+    b = np.array([BadValue()], dtype=object)
+    assert not _values_equal(a, b)

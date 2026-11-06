@@ -1,0 +1,188 @@
+"""Test data and factories for Connection element."""
+
+import numpy as np
+
+from custom_components.haeo_homusman.core.model.elements.connection import Connection
+
+from .connection_types import ConnectionTestCase
+
+VALID_CASES: list[ConnectionTestCase] = [
+    {
+        "description": "Connection with forward flow only",
+        "factory": Connection,
+        "data": {
+            "name": "forward_connection",
+            "periods": np.array([1.0] * 3),
+            "source": "battery",
+            "target": "load",
+            "tags": {1},
+            "segments": {"power_limit": {"segment_type": "power_limit", "max_power": 5.0}},
+        },
+        "inputs": {
+            "maximize_power_out": True,
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (5.0, 5.0, 5.0)},
+            "segments": {"power_limit": {"power_limit": {"type": "shadow_price", "unit": "$/kWh", "values": (-1.0, -1.0, -1.0)}}},
+        },
+    },
+    {
+        "description": "Connection respecting forward power limit",
+        "factory": Connection,
+        "data": {
+            "name": "limited_forward",
+            "periods": np.array([1.0] * 2),
+            "source": "gen",
+            "target": "net",
+            "tags": {1},
+            "segments": {"power_limit": {"segment_type": "power_limit", "max_power": 4.0}},
+        },
+        "inputs": {
+            "maximize_power_out": True,
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (4.0, 4.0)},
+            "segments": {"power_limit": {"power_limit": {"type": "shadow_price", "unit": "$/kWh", "values": (-1.0, -1.0)}}},
+        },
+    },
+    {
+        "description": "Connection with efficiency losses",
+        "factory": Connection,
+        "data": {
+            "name": "inverter",
+            "periods": np.array([1.0] * 2),
+            "source": "dc",
+            "target": "ac",
+            "tags": {1},
+            "segments": {
+                "efficiency": {"segment_type": "efficiency", "efficiency": 0.95},
+                "power_limit": {"segment_type": "power_limit", "max_power": 10.0},
+            },
+        },
+        "inputs": {
+            "fix_power_in": [5.0, 5.0],
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (4.75, 4.75)},
+        },
+    },
+    {
+        "description": "Connection with transfer pricing and power flow",
+        "factory": Connection,
+        "data": {
+            "name": "priced_active_link",
+            "periods": np.array([1.0, 0.5]),
+            "source": "cheap_grid",
+            "target": "load_node",
+            "tags": {1},
+            "segments": {
+                "power_limit": {"segment_type": "power_limit", "max_power": 5.0},
+                "pricing": {"segment_type": "pricing", "price": np.array([0.10, 0.20])},
+            },
+        },
+        "inputs": {
+            "maximize_power_out": True,
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (5.0, 5.0)},
+            "segments": {"power_limit": {"power_limit": {"type": "shadow_price", "unit": "$/kWh", "values": (-0.9, -0.8)}}},
+        },
+    },
+    {
+        "description": "Connection with time-varying limits",
+        "factory": Connection,
+        "data": {
+            "name": "varying_connection",
+            "periods": np.array([1.0] * 3),
+            "source": "grid",
+            "target": "net",
+            "tags": {1},
+            "segments": {"power_limit": {"segment_type": "power_limit", "max_power": np.array([10.0, 5.0, 8.0])}},
+        },
+        "inputs": {
+            "maximize_power_out": True,
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (10.0, 5.0, 8.0)},
+            "segments": {"power_limit": {"power_limit": {"type": "shadow_price", "unit": "$/kWh", "values": (-1.0, -1.0, -1.0)}}},
+        },
+    },
+    {
+        "description": "Connection with pricing cost minimization",
+        "factory": Connection,
+        "data": {
+            "name": "priced_connection",
+            "periods": np.array([1.0, 1.0]),
+            "source": "node_a",
+            "target": "node_b",
+            "tags": {1},
+            "segments": {
+                "power_limit": {"segment_type": "power_limit", "max_power": 4.0},
+                "pricing": {"segment_type": "pricing", "price": np.array([0.10, 0.20])},
+            },
+        },
+        "inputs": {
+            "maximize_power_out": True,
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (4.0, 4.0)},
+            "segments": {"power_limit": {"power_limit": {"type": "shadow_price", "unit": "$/kWh", "values": (-0.9, -0.8)}}},
+        },
+    },
+    {
+        "description": "Connection with fixed power",
+        "factory": Connection,
+        "data": {
+            "name": "fixed_connection",
+            "periods": np.array([1.0] * 2),
+            "source": "generator",
+            "target": "load",
+            "tags": {1},
+            "segments": {
+                "power_limit": {"segment_type": "power_limit", "max_power": 4.0, "fixed": True},
+            },
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (4.0, 4.0)},
+        },
+    },
+    {
+        "description": "Connection with no segments passes through",
+        "factory": Connection,
+        "data": {
+            "name": "passthrough",
+            "periods": np.array([1.0] * 2),
+            "source": "a",
+            "target": "b",
+            "tags": {1},
+        },
+        "inputs": {
+            "fix_power_in": [3.0, 7.0],
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (3.0, 7.0)},
+        },
+    },
+    {
+        "description": "Connection with efficiency and pricing chain",
+        "factory": Connection,
+        "data": {
+            "name": "chain",
+            "periods": np.array([1.0] * 2),
+            "source": "dc",
+            "target": "ac",
+            "tags": {1},
+            "segments": {
+                "efficiency": {"segment_type": "efficiency", "efficiency": 0.90},
+                "power_limit": {"segment_type": "power_limit", "max_power": 10.0},
+                "pricing": {"segment_type": "pricing", "price": np.array([0.10, 0.10])},
+            },
+        },
+        "inputs": {
+            "fix_power_in": [10.0, 10.0],
+        },
+        "expected_outputs": {
+            "connection_power": {"type": "power_flow", "unit": "kW", "values": (9.0, 9.0)},
+        },
+    },
+]

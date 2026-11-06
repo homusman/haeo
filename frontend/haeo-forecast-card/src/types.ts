@@ -3,7 +3,7 @@ import type { DefaultHorizonPreset } from "./horizon-config";
 export type PowerDisplayMode = "opposed" | "overlay";
 
 export interface ForecastCardConfig {
-  type: "custom:haeo-forecast-card";
+  type: "custom:haeo-homusman-forecast-card";
   title?: string;
   hub_entry_id?: string;
   entities?: string[];
@@ -13,7 +13,7 @@ export interface ForecastCardConfig {
 }
 
 export interface TopologyCardConfig {
-  type: "custom:haeo-topology-card";
+  type: "custom:haeo-homusman-topology-card";
   title?: string;
   hub_entry_id?: string;
 }

@@ -1,8 +1,8 @@
 {
-  "name": "HAEO",
+  "name": "HAEO - Homusman fork",
   "hacs": "2.0.5",
   "homeassistant": "2026.1.1",
-  "filename": "haeo.zip",
+  "filename": "haeo_homusman.zip",
   "render_readme": true,
   "zip_release": true
 }

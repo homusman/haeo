@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { normalizeSeries, type HassLike } from "./series";
 import { DEFAULT_TEST_HUB, loadScenarioHassState, withSingleHubRegistry } from "./fixtures/scenarioOutputs";
 
-const testHubConfig = { type: "custom:haeo-forecast-card" as const, hub_entry_id: DEFAULT_TEST_HUB };
+const testHubConfig = { type: "custom:haeo-homusman-forecast-card" as const, hub_entry_id: DEFAULT_TEST_HUB };
 
 describe("normalizeSeries", () => {
   it("builds typed arrays and inferred lane metadata", () => {
@@ -74,7 +74,7 @@ describe("normalizeSeries", () => {
       },
     });
 
-    expect(normalizeSeries(hass, { type: "custom:haeo-forecast-card" })).toHaveLength(0);
+    expect(normalizeSeries(hass, { type: "custom:haeo-homusman-forecast-card" })).toHaveLength(0);
   });
 
   it("ingests scenario outputs emitted by HAEO integration", () => {
@@ -392,8 +392,8 @@ describe("normalizeSeries", () => {
         },
       },
       entities: {
-        "sensor.haeo_grid_import_power": { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.other_hub_import_power": { platform: "haeo", device_id: "dev-beta" },
+        "sensor.haeo_grid_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.other_hub_import_power": { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -402,7 +402,7 @@ describe("normalizeSeries", () => {
     };
 
     const output = normalizeSeries(hass, {
-      type: "custom:haeo-forecast-card",
+      type: "custom:haeo-homusman-forecast-card",
       hub_entry_id: "hub-alpha",
     });
     expect(output).toHaveLength(1);
@@ -428,8 +428,8 @@ describe("normalizeSeries", () => {
         },
       },
       entities: {
-        "sensor.grid_import_power": { platform: "haeo" },
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.grid_import_power": { platform: "haeo_homusman" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -437,7 +437,7 @@ describe("normalizeSeries", () => {
     };
 
     const output = normalizeSeries(hass, {
-      type: "custom:haeo-forecast-card",
+      type: "custom:haeo-homusman-forecast-card",
       hub_entry_id: "hub-alpha",
     });
     expect(output).toHaveLength(0);
@@ -462,7 +462,7 @@ describe("normalizeSeries", () => {
         },
       },
       entities: {
-        "sensor.grid_import_power": { platform: "haeo", device_id: "dev-beta" },
+        "sensor.grid_import_power": { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-beta": { config_entries: ["hub-beta"] },
@@ -471,13 +471,13 @@ describe("normalizeSeries", () => {
 
     expect(
       normalizeSeries(hass, {
-        type: "custom:haeo-forecast-card",
+        type: "custom:haeo-homusman-forecast-card",
         hub_entry_id: "hub-deleted",
       })
     ).toHaveLength(0);
   });
 
   it("returns empty for null hass", () => {
-    expect(normalizeSeries(null, { type: "custom:haeo-forecast-card" })).toHaveLength(0);
+    expect(normalizeSeries(null, { type: "custom:haeo-homusman-forecast-card" })).toHaveLength(0);
   });
 });

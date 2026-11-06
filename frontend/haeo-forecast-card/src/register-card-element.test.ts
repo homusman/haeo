@@ -21,8 +21,8 @@ function freshRegistry(): Pick<CustomElementRegistry, "define" | "get"> {
 }
 
 const cards: [string, () => Promise<unknown>][] = [
-  ["haeo-forecast-card", () => import("./card")],
-  ["haeo-topology-card", () => import("./topology-card")],
+  ["haeo-homusman-forecast-card", () => import("./card")],
+  ["haeo-homusman-topology-card", () => import("./topology-card")],
 ];
 
 describe("card element registration", () => {

@@ -10,7 +10,7 @@ interface ForecastCardConstructor {
 
 interface HaeoCardElement extends HTMLElement {
   setConfig: (config: {
-    type: "custom:haeo-forecast-card";
+    type: "custom:haeo-homusman-forecast-card";
     title?: string;
     hub_entry_id?: string;
     entities?: string[];
@@ -26,7 +26,7 @@ interface HaeoCardElement extends HTMLElement {
 }
 
 const smokeConfig = {
-  type: "custom:haeo-forecast-card" as const,
+  type: "custom:haeo-homusman-forecast-card" as const,
   hub_entry_id: "hub-alpha",
   entities: ["sensor.haeo_grid_import_power"],
 };
@@ -47,28 +47,28 @@ function smokeHass(states: HassLike["states"]): HassLike {
   return withSingleHubRegistry({ states }, "hub-alpha");
 }
 
-describe("haeo-forecast-card smoke", () => {
+describe("haeo-homusman-forecast-card smoke", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
   it("defines the custom element and accepts config", () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     element.setConfig(smokeConfig);
     document.body.appendChild(element);
 
-    expect(customElements.get("haeo-forecast-card")).toBeDefined();
+    expect(customElements.get("haeo-homusman-forecast-card")).toBeDefined();
     expect(element).toBeInstanceOf(HTMLElement);
   });
 
   it("reports fallback sizing before the rendering controller loads", () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     expect(element.getCardSize()).toBe(6);
     expect(element.getGridOptions()).toEqual({ rows: 5, min_rows: 4, columns: "full" });
   });
 
   it("renders svg when hass is set after connect", async () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     document.body.appendChild(element);
     element.setConfig(smokeConfig);
     await waitForController();
@@ -99,7 +99,7 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("renders svg when forecast data is provided", async () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     element.setConfig(smokeConfig);
     element.hass = smokeHass({
       "sensor.haeo_grid_import_power": {
@@ -130,9 +130,9 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("renders empty state when hass data is not set", async () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     element.setConfig({
-      type: "custom:haeo-forecast-card",
+      type: "custom:haeo-homusman-forecast-card",
     });
     document.body.appendChild(element);
     await waitForController();
@@ -167,7 +167,7 @@ describe("haeo-forecast-card smoke", () => {
       return new DOMRect(0, 0, 520, 0);
     });
 
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     try {
       element.setConfig(smokeConfig);
       element.hass = smokeHass({
@@ -237,7 +237,7 @@ describe("haeo-forecast-card smoke", () => {
       return new DOMRect(0, 0, 520, 0);
     });
 
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     element.setConfig(smokeConfig);
     document.body.appendChild(element);
     await waitForController();
@@ -247,7 +247,7 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("falls back to the host width before the shadow mount exists", () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     const bounds = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 480, 0));
 
     expect(element.getCardWidth()).toBe(480);
@@ -257,9 +257,9 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("builds stub config with the first discovered hub", () => {
-    const ctor = customElements.get("haeo-forecast-card");
+    const ctor = customElements.get("haeo-homusman-forecast-card");
     if (ctor === undefined) {
-      throw new Error("Expected haeo-forecast-card custom element");
+      throw new Error("Expected haeo-homusman-forecast-card custom element");
     }
     const cardClass = ctor as unknown as ForecastCardConstructor;
     expect(cardClass.getStubConfig()).toEqual({ title: "HAEO forecast" });
@@ -267,7 +267,7 @@ describe("haeo-forecast-card smoke", () => {
       cardClass.getStubConfig({
         states: {},
         entities: {
-          "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
+          "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
         },
         devices: {
           "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -277,9 +277,9 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("exposes the shared config form", () => {
-    const ctor = customElements.get("haeo-forecast-card");
+    const ctor = customElements.get("haeo-homusman-forecast-card");
     if (ctor === undefined) {
-      throw new Error("Expected haeo-forecast-card custom element");
+      throw new Error("Expected haeo-homusman-forecast-card custom element");
     }
     const cardClass = ctor as unknown as ForecastCardConstructor & {
       getConfigForm: () => { schema: Array<{ name: string }> };
@@ -288,7 +288,7 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("replays config and hass through the shim after the controller loads", async () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     element.setConfig(smokeConfig);
     document.body.appendChild(element);
     await waitForController();
@@ -318,7 +318,7 @@ describe("haeo-forecast-card smoke", () => {
   });
 
   it("reconnects the rendering controller after DOM detach and reattach", async () => {
-    const element = document.createElement("haeo-forecast-card") as HaeoCardElement;
+    const element = document.createElement("haeo-homusman-forecast-card") as HaeoCardElement;
     element.setConfig(smokeConfig);
     element.hass = smokeHass({
       "sensor.haeo_grid_import_power": {

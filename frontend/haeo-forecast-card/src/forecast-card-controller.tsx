@@ -14,7 +14,7 @@ const SECTIONS_ROW_GAP_PX = 8;
 
 /**
  * Owns the heavy rendering stack (preact, MobX store, SVG view) for the forecast
- * card. It is loaded lazily by the thin `haeo-forecast-card` element so that
+ * card. It is loaded lazily by the thin `haeo-homusman-forecast-card` element so that
  * custom-element registration never waits on this code to download or evaluate.
  */
 export class ForecastCardController {

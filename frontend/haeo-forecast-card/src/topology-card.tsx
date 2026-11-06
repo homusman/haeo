@@ -18,7 +18,7 @@ function buildTopologyStubConfig(hass: HassLike): Omit<TopologyCardConfig, "type
 }
 
 /**
- * Thin custom element for `haeo-topology-card`.
+ * Thin custom element for `haeo-homusman-topology-card`.
  *
  * Kept free of heavy imports (preact, ELK, the SVG view) so that
  * `customElements.define` runs immediately when the bundle loads, avoiding the
@@ -28,12 +28,12 @@ function buildTopologyStubConfig(hass: HassLike): Omit<TopologyCardConfig, "type
 export class HaeoTopologyCard extends HTMLElement {
   private controller: TopologyCardController | null = null;
   private controllerPromise: Promise<TopologyCardController> | null = null;
-  private _config: TopologyCardConfig = { type: "custom:haeo-topology-card" };
+  private _config: TopologyCardConfig = { type: "custom:haeo-homusman-topology-card" };
   private _hass: HassLike | null = null;
   private isConnected_ = false;
 
   setConfig(config: TopologyCardConfig): void {
-    this._config = { ...config, type: "custom:haeo-topology-card" };
+    this._config = { ...config, type: "custom:haeo-homusman-topology-card" };
     if (this.controller) {
       this.controller.setConfig(this._config);
     } else {
@@ -115,4 +115,4 @@ export class HaeoTopologyCard extends HTMLElement {
   }
 }
 
-registerCardElement("haeo-topology-card", HaeoTopologyCard);
+registerCardElement("haeo-homusman-topology-card", HaeoTopologyCard);

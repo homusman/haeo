@@ -1,0 +1,176 @@
+"""Inverter element adapter for model layer integration."""
+
+from collections.abc import Mapping
+from dataclasses import replace
+from typing import Final, Literal
+
+from custom_components.haeo_homusman.core.adapters.output_utils import (
+    connection_power,
+    expect_output_data,
+    power_limit_shadow_price,
+)
+from custom_components.haeo_homusman.core.const import ConnectivityLevel
+from custom_components.haeo_homusman.core.model import ModelElementConfig, ModelOutputName, ModelOutputValue
+from custom_components.haeo_homusman.core.model.const import OutputType
+from custom_components.haeo_homusman.core.model.element import ELEMENT_POWER_BALANCE
+from custom_components.haeo_homusman.core.model.elements import MODEL_ELEMENT_TYPE_CONNECTION, MODEL_ELEMENT_TYPE_NODE
+from custom_components.haeo_homusman.core.model.output_data import OutputData
+from custom_components.haeo_homusman.core.schema import extract_connection_target
+from custom_components.haeo_homusman.core.schema.elements import ElementType
+from custom_components.haeo_homusman.core.schema.elements.buffer import BufferRole
+from custom_components.haeo_homusman.core.schema.elements.inverter import ELEMENT_TYPE, InverterConfigData
+from custom_components.haeo_homusman.core.schema.sections import (
+    CONF_CONNECTION,
+    CONF_EFFICIENCY_SOURCE_TARGET,
+    CONF_EFFICIENCY_TARGET_SOURCE,
+    CONF_MAX_POWER_SOURCE_TARGET,
+    CONF_MAX_POWER_TARGET_SOURCE,
+    SECTION_EFFICIENCY,
+    SECTION_POWER_LIMITS,
+)
+
+# Inverter output names
+type InverterOutputName = Literal[
+    "inverter_power_dc_to_ac",
+    "inverter_power_ac_to_dc",
+    "inverter_power_active",
+    "inverter_dc_bus_power_balance",
+    "inverter_max_power_dc_to_ac_price",
+    "inverter_max_power_ac_to_dc_price",
+]
+
+INVERTER_OUTPUT_NAMES: Final[frozenset[InverterOutputName]] = frozenset(
+    (
+        INVERTER_POWER_DC_TO_AC := "inverter_power_dc_to_ac",
+        INVERTER_POWER_AC_TO_DC := "inverter_power_ac_to_dc",
+        INVERTER_POWER_ACTIVE := "inverter_power_active",
+        INVERTER_DC_BUS_POWER_BALANCE := "inverter_dc_bus_power_balance",
+        # Shadow prices
+        INVERTER_MAX_POWER_DC_TO_AC_PRICE := "inverter_max_power_dc_to_ac_price",
+        INVERTER_MAX_POWER_AC_TO_DC_PRICE := "inverter_max_power_ac_to_dc_price",
+    )
+)
+
+type InverterDeviceName = Literal[ElementType.INVERTER]
+
+INVERTER_DEVICE_NAMES: Final[frozenset[InverterDeviceName]] = frozenset(
+    (INVERTER_DEVICE_INVERTER := ElementType.INVERTER,),
+)
+
+
+class InverterAdapter:
+    """Adapter for Inverter elements."""
+
+    element_type: str = ELEMENT_TYPE
+    advanced: bool = False
+    connectivity: ConnectivityLevel = ConnectivityLevel.ALWAYS
+    can_source: bool = False
+    can_sink: bool = False
+    switchboard: bool = False
+    device_names: frozenset[InverterDeviceName] = INVERTER_DEVICE_NAMES
+    buffer_roles: frozenset[BufferRole] = frozenset()
+
+    def model_elements(self, config: InverterConfigData) -> list[ModelElementConfig]:
+        """Return model element parameters for Inverter configuration.
+
+        Efficiency sits next to the DC bus and the power limit at the AC end,
+        where the inverter's rating applies, in both directions.
+        """
+        return [
+            {
+                "element_type": MODEL_ELEMENT_TYPE_NODE,
+                "name": config["name"],
+                "is_source": False,
+                "is_sink": False,
+            },
+            {
+                "element_type": MODEL_ELEMENT_TYPE_CONNECTION,
+                "name": f"{config['name']}:dc_to_ac",
+                "source": config["name"],
+                "target": extract_connection_target(config[CONF_CONNECTION]),
+                "segments": {
+                    "efficiency": {
+                        "segment_type": "efficiency",
+                        "efficiency": config[SECTION_EFFICIENCY].get(CONF_EFFICIENCY_SOURCE_TARGET),
+                    },
+                    "power_limit": {
+                        "segment_type": "power_limit",
+                        "max_power": config[SECTION_POWER_LIMITS].get(CONF_MAX_POWER_SOURCE_TARGET),
+                    },
+                },
+            },
+            {
+                "element_type": MODEL_ELEMENT_TYPE_CONNECTION,
+                "name": f"{config['name']}:ac_to_dc",
+                "source": extract_connection_target(config[CONF_CONNECTION]),
+                "target": config["name"],
+                "segments": {
+                    "power_limit": {
+                        "segment_type": "power_limit",
+                        "max_power": config[SECTION_POWER_LIMITS].get(CONF_MAX_POWER_TARGET_SOURCE),
+                    },
+                    "efficiency": {
+                        "segment_type": "efficiency",
+                        "efficiency": config[SECTION_EFFICIENCY].get(CONF_EFFICIENCY_TARGET_SOURCE),
+                    },
+                },
+            },
+        ]
+
+    def outputs(
+        self,
+        name: str,
+        model_outputs: Mapping[str, Mapping[ModelOutputName, ModelOutputValue]],
+        **_kwargs: object,
+    ) -> Mapping[InverterDeviceName, Mapping[InverterOutputName, OutputData]]:
+        """Map model outputs to inverter-specific output names."""
+        forward_conn = model_outputs.get(f"{name}:dc_to_ac")
+        reverse_conn = model_outputs.get(f"{name}:ac_to_dc")
+        dc_bus = model_outputs[name]
+        period_count = len(expect_output_data(dc_bus[ELEMENT_POWER_BALANCE]).values)
+        # Each connection reports power at its measured point, where its power limit
+        # applies: the AC side.
+        power_forward = connection_power(forward_conn, period_count)
+        power_reverse = connection_power(reverse_conn, period_count)
+
+        inverter_outputs: dict[InverterOutputName, OutputData] = {}
+
+        # source_target = DC to AC (inverting)
+        # target_source = AC to DC (rectifying)
+        inverter_outputs[INVERTER_POWER_DC_TO_AC] = replace(power_forward, direction="+")
+        inverter_outputs[INVERTER_POWER_AC_TO_DC] = replace(power_reverse, direction="-")
+
+        # Active inverter power (DC to AC - AC to DC)
+        inverter_outputs[INVERTER_POWER_ACTIVE] = replace(
+            power_forward,
+            values=tuple(
+                dc_to_ac - ac_to_dc
+                for dc_to_ac, ac_to_dc in zip(
+                    power_forward.values,
+                    power_reverse.values,
+                    strict=True,
+                )
+            ),
+            direction=None,
+            type=OutputType.POWER_FLOW,
+        )
+
+        # DC bus power balance shadow price
+        inverter_outputs[INVERTER_DC_BUS_POWER_BALANCE] = expect_output_data(dc_bus[ELEMENT_POWER_BALANCE])
+
+        # Shadow prices from power_limit segments on each connection
+        shadow_price_mappings: tuple[
+            tuple[Mapping[ModelOutputName, ModelOutputValue] | None, InverterOutputName],
+            ...,
+        ] = (
+            (forward_conn, INVERTER_MAX_POWER_DC_TO_AC_PRICE),
+            (reverse_conn, INVERTER_MAX_POWER_AC_TO_DC_PRICE),
+        )
+        for conn, output_name in shadow_price_mappings:
+            if (shadow := power_limit_shadow_price(conn)) is not None:
+                inverter_outputs[output_name] = shadow
+
+        return {INVERTER_DEVICE_INVERTER: inverter_outputs}
+
+
+adapter = InverterAdapter()

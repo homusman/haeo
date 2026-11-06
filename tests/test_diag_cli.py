@@ -12,11 +12,11 @@ from homeassistant.util.json import JsonValueType
 import numpy as np
 import pytest
 
-from custom_components.haeo.core.data.loader import config_loader as cl
-from custom_components.haeo.core.data.loader.config_loader import load_element_config
-from custom_components.haeo.core.schema import as_constant_value
-from custom_components.haeo.core.schema.elements import ElementType, battery
-from custom_components.haeo.core.schema.elements.conformance import is_element_config_schema
+from custom_components.haeo_homusman.core.data.loader import config_loader as cl
+from custom_components.haeo_homusman.core.data.loader.config_loader import load_element_config
+from custom_components.haeo_homusman.core.schema import as_constant_value
+from custom_components.haeo_homusman.core.schema.elements import ElementType, battery
+from custom_components.haeo_homusman.core.schema.elements.conformance import is_element_config_schema
 from tools.diag import cli as diag
 from tools.diag import run_diagnostics
 

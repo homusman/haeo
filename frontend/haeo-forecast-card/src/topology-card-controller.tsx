@@ -10,18 +10,18 @@ import type { TopologyCardConfig } from "./types";
 
 /**
  * Owns the heavy rendering stack (preact, ELK layout, SVG view) for the
- * topology card. Loaded lazily by the thin `haeo-topology-card` element so that
+ * topology card. Loaded lazily by the thin `haeo-homusman-topology-card` element so that
  * custom-element registration never waits on ELK to download or evaluate.
  */
 export class TopologyCardController {
-  private _config: TopologyCardConfig = { type: "custom:haeo-topology-card" };
+  private _config: TopologyCardConfig = { type: "custom:haeo-homusman-topology-card" };
   private _hass: HassLike | null = null;
   private _layoutHeight = TOPOLOGY_DEFAULT_LAYOUT_HEIGHT_PX;
 
   constructor(private readonly host: HTMLElement) {}
 
   setConfig(config: TopologyCardConfig): void {
-    this._config = { ...config, type: "custom:haeo-topology-card" };
+    this._config = { ...config, type: "custom:haeo-homusman-topology-card" };
     this.renderCard();
   }
 

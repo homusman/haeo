@@ -10,7 +10,7 @@ const FALLBACK_CARD_SIZE_ROWS = 6;
 const FALLBACK_GRID_ROWS = 5;
 
 /**
- * Thin custom element for `haeo-forecast-card`.
+ * Thin custom element for `haeo-homusman-forecast-card`.
  *
  * This class is intentionally tiny and free of heavy imports (no preact, MobX,
  * or SVG view code) so that `customElements.define` runs immediately when the
@@ -130,4 +130,4 @@ export class HaeoForecastCard extends HTMLElement {
   }
 }
 
-registerCardElement("haeo-forecast-card", HaeoForecastCard);
+registerCardElement("haeo-homusman-forecast-card", HaeoForecastCard);

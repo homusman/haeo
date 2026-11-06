@@ -11,7 +11,7 @@ from syrupy.extensions.json import JSONSnapshotExtension
 from syrupy.location import PyTestLocation
 from syrupy.types import PropertyFilter, PropertyMatcher, SerializableData, SerializedData, SnapshotIndex
 
-from custom_components.haeo.core.model.const import OutputType
+from custom_components.haeo_homusman.core.model.const import OutputType
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 

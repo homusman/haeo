@@ -51,14 +51,14 @@ describe("topology-card-utils", () => {
         [entityId]: scenarioOutputs[entityId as keyof typeof scenarioOutputs] as HassLike["states"][string],
       },
       entities: {
-        [entityId]: { platform: "haeo", device_id: "dev-alpha" },
+        [entityId]: { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
       },
     } as HassLike;
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     };
 
@@ -83,14 +83,14 @@ describe("topology-card-utils", () => {
         [entityId]: scenarioOutputs[entityId as keyof typeof scenarioOutputs] as HassLike["states"][string],
       },
       entities: {
-        [entityId]: { platform: "haeo", device_id: "dev-beta" },
+        [entityId]: { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-beta": { config_entries: ["hub-beta"] },
       },
     } as HassLike;
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-deleted",
     };
 
@@ -114,8 +114,8 @@ describe("topology-card-utils", () => {
         },
       },
       entities: {
-        "sensor.topology_a": { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.topology_b": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.topology_a": { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.topology_b": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -123,7 +123,7 @@ describe("topology-card-utils", () => {
     };
 
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     };
 
@@ -143,7 +143,7 @@ describe("topology-card-utils", () => {
       },
     };
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
     };
 
     expect(resolveTopology(config, hass)).toEqual({ status: "not_configured" });
@@ -151,7 +151,7 @@ describe("topology-card-utils", () => {
 
   it("reports hub_not_found when hass is unavailable", () => {
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     };
 
@@ -194,15 +194,15 @@ describe("topology-card-utils", () => {
         },
       },
       entities: {
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.other_topology": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.other_topology": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
       },
     };
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     };
 
@@ -232,7 +232,7 @@ describe("topology-card-utils", () => {
       },
     };
     const config: TopologyCardConfig = {
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     };
 

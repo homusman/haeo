@@ -34,7 +34,7 @@ export function buildHubConfigForm(): ConfigFormDefinition {
       {
         name: "hub_entry_id",
         required: true,
-        selector: { config_entry: { integration: "haeo" } },
+        selector: { config_entry: { integration: "haeo_homusman" } },
       },
       {
         name: "power_display_mode",

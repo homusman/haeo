@@ -100,7 +100,7 @@ function ForecastCardElementFrame(props: {
       return;
     }
     element.setConfig({
-      type: "custom:haeo-forecast-card",
+      type: "custom:haeo-homusman-forecast-card",
       title: `${props.args.scenario} forecast (${props.args.dataMode})`,
       power_display_mode: props.args.powerDisplayMode,
     });
@@ -133,7 +133,7 @@ function ForecastCardElementFrame(props: {
   ]);
 
   return (
-    <haeo-forecast-card
+    <haeo-homusman-forecast-card
       ref={ref}
       style={{
         display: "flex",

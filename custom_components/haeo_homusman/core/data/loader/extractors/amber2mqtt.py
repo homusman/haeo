@@ -1,0 +1,105 @@
+"""Amber2MQTT energy pricing forecast parser.
+
+This parser handles the amber2mqtt integration which provides Amber Electric
+data via MQTT. Key differences from the official Amber Electric integration:
+- Uses "Forecasts" (capitalized) instead of "forecasts" as the attribute key
+- Feed-in sensors (detected by channel_type attribute) have negated per_kwh values
+"""
+
+from collections.abc import Mapping, Sequence
+from datetime import datetime, tzinfo
+import logging
+from typing import Literal, Protocol, TypedDict, TypeGuard
+
+from custom_components.haeo_homusman.core.state import EntityState
+from custom_components.haeo_homusman.core.units import DeviceClass, UnitOfMeasurement
+
+from .utils import is_parsable_to_datetime, parse_datetime_to_timestamp, step_points
+
+_LOGGER = logging.getLogger(__name__)
+
+Format = Literal["amber2mqtt"]
+DOMAIN: Format = "amber2mqtt"
+
+
+class Amber2MqttForecastEntry(TypedDict):
+    """Type definition for an Amber2MQTT forecast entry."""
+
+    start_time: str | datetime
+    end_time: str | datetime
+    advanced_price_predicted: float
+
+
+class Amber2MqttAttributes(TypedDict):
+    """Type definition for Amber2MQTT State attributes."""
+
+    Forecasts: Sequence[Amber2MqttForecastEntry]
+    channel_type: str
+
+
+class Amber2MqttState(Protocol):
+    """Protocol for a State object with validated Amber2MQTT forecast data."""
+
+    entity_id: str
+    attributes: Amber2MqttAttributes
+
+
+class Parser:
+    """Parser for Amber2MQTT pricing forecast data."""
+
+    DOMAIN: Format = DOMAIN
+    UNIT: UnitOfMeasurement = UnitOfMeasurement.DOLLAR_PER_KWH  # Amber Electric prices are in $/kWh
+    DEVICE_CLASS: DeviceClass = DeviceClass.MONETARY
+
+    @staticmethod
+    def detect(state: EntityState) -> TypeGuard[Amber2MqttState]:
+        """Check if data matches Amber2MQTT pricing format and narrow type.
+
+        Amber2MQTT uses "Forecasts" (capitalized) instead of "forecasts".
+        """
+        if "Forecasts" not in state.attributes:
+            return False
+
+        forecasts = state.attributes["Forecasts"]
+        if not (isinstance(forecasts, Sequence) and not isinstance(forecasts, (str, bytes))) or not forecasts:
+            return False
+
+        return all(
+            isinstance(item, Mapping)
+            and "start_time" in item
+            and "end_time" in item
+            and "advanced_price_predicted" in item
+            and isinstance(item["advanced_price_predicted"], (int, float))
+            and is_parsable_to_datetime(item["start_time"])
+            and is_parsable_to_datetime(item["end_time"])
+            for item in forecasts
+        )
+
+    @staticmethod
+    def _round_to_minute(timestamp: str | datetime, time_zone: tzinfo) -> int:
+        """Round timestamp to nearest minute (Amber provides times 1 second into each period)."""
+        raw = parse_datetime_to_timestamp(timestamp, time_zone)
+        return int(round(raw / 60.0) * 60.0)
+
+    @staticmethod
+    def extract(
+        state: Amber2MqttState, time_zone: tzinfo
+    ) -> tuple[Sequence[tuple[int, float]], UnitOfMeasurement, DeviceClass]:
+        """Extract forecast data from Amber2MQTT pricing format.
+
+        Each price holds for its whole window, so the windows become a step function.
+
+        For feed-in sensors (detected by channel_type attribute), the per_kwh value is negated.
+
+        Returns timestamps in seconds as integers.
+        """
+        sign = -1 if state.attributes.get("channel_type") == "feedin" else 1
+        parsed = step_points(
+            (
+                Parser._round_to_minute(item["start_time"], time_zone),
+                Parser._round_to_minute(item["end_time"], time_zone),
+                sign * item["advanced_price_predicted"],
+            )
+            for item in state.attributes["Forecasts"]
+        )
+        return parsed, Parser.UNIT, Parser.DEVICE_CLASS

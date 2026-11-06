@@ -1,0 +1,304 @@
+"""Tests for network connectivity validation."""
+
+import numpy as np
+import pytest
+
+from custom_components.haeo_homusman.core.const import CONF_ELEMENT_TYPE, CONF_NAME
+from custom_components.haeo_homusman.core.schema import as_connection_target
+from custom_components.haeo_homusman.core.schema.elements import ElementConfigData, ElementType
+from custom_components.haeo_homusman.core.schema.elements.battery import (
+    CONF_CAPACITY,
+    CONF_CHARGE_LIMIT_COST,
+    CONF_INITIAL_CHARGE_PERCENTAGE,
+    CONF_MAX_CHARGE_PERCENTAGE,
+    CONF_MIN_CHARGE_PERCENTAGE,
+    CONF_SALVAGE_VALUE,
+    SECTION_ADVANCED,
+    SECTION_LIMITS,
+    SECTION_STORAGE,
+    BatteryConfigData,
+)
+from custom_components.haeo_homusman.core.schema.elements.battery_section import CONF_INITIAL_CHARGE, BatterySectionConfigData
+from custom_components.haeo_homusman.core.schema.elements.buffer import KIND_RESERVE, BufferConfigData
+from custom_components.haeo_homusman.core.schema.elements.connection import (
+    CONF_SOURCE,
+    CONF_TARGET,
+    SECTION_ENDPOINTS,
+    ConnectionConfigData,
+)
+from custom_components.haeo_homusman.core.schema.elements.grid import GridConfigData
+from custom_components.haeo_homusman.core.schema.elements.node import CONF_IS_SINK, CONF_IS_SOURCE, SECTION_ROLE, NodeConfigData
+from custom_components.haeo_homusman.core.schema.sections import (
+    CONF_CONNECTION,
+    CONF_EFFICIENCY_SOURCE_TARGET,
+    CONF_EFFICIENCY_TARGET_SOURCE,
+    CONF_MAX_POWER_SOURCE_TARGET,
+    CONF_MAX_POWER_TARGET_SOURCE,
+    CONF_PRICE_SOURCE_TARGET,
+    CONF_PRICE_TARGET_SOURCE,
+    SECTION_EFFICIENCY,
+    SECTION_POWER_LIMITS,
+    SECTION_PRICING,
+)
+from custom_components.haeo_homusman.validation import (
+    find_invalid_connection_endpoints,
+    format_component_summary,
+    validate_network_topology,
+)
+
+BATTERY_CONF_CONNECTION = CONF_CONNECTION
+GRID_CONF_CONNECTION = CONF_CONNECTION
+
+
+def test_format_component_summary() -> None:
+    """Component summary formats components with numbering."""
+    components = [("a", "b"), ("c",), ("d", "e", "f")]
+    summary = format_component_summary(components)
+    assert "1) a, b" in summary
+    assert "2) c" in summary
+    assert "3) d, e, f" in summary
+
+
+def test_format_component_summary_custom_separator() -> None:
+    """Component summary respects custom separator."""
+    components = [("a", "b"), ("c",)]
+    summary = format_component_summary(components, separator=" | ")
+    assert summary == "1) a, b | 2) c"
+
+
+def test_validate_network_topology_empty() -> None:
+    """Empty participant set is considered connected."""
+    result = validate_network_topology({})
+    assert result.is_connected is True
+    assert result.components == ()
+
+
+def test_validate_network_topology_with_implicit_connection() -> None:
+    """Element with implicit connection field creates edge to target node."""
+    main_node: NodeConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.NODE,
+        CONF_NAME: "main",
+        SECTION_ROLE: {CONF_IS_SOURCE: False, CONF_IS_SINK: False},
+    }
+    grid: GridConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.GRID,
+        CONF_NAME: "grid",
+        GRID_CONF_CONNECTION: as_connection_target("main"),
+        SECTION_PRICING: {
+            CONF_PRICE_SOURCE_TARGET: np.array([0.30, 0.30]),
+            CONF_PRICE_TARGET_SOURCE: np.array([0.10, 0.10]),
+        },
+        SECTION_POWER_LIMITS: {},
+    }
+    participants: dict[str, ElementConfigData] = {"main_node": main_node, "grid": grid}
+
+    result = validate_network_topology(participants)
+
+    assert result.is_connected is True
+    assert result.components == (("grid", "main"),)
+
+
+def test_validate_network_topology_ignores_buffers() -> None:
+    """A buffer reads the elements it covers without being a separate part of the network."""
+    main_node: NodeConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.NODE,
+        CONF_NAME: "main",
+        SECTION_ROLE: {CONF_IS_SOURCE: False, CONF_IS_SINK: False},
+    }
+    backup: BufferConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.BUFFER,
+        CONF_NAME: "backup",
+        "kind": KIND_RESERVE,
+        "participants": {"storage": ["main"]},
+        "requirement": {"window": 4.0},
+        "pricing": {"shortfall_cost": 0.1},
+    }
+    participants: dict[str, ElementConfigData] = {"main_node": main_node, "backup": backup}
+
+    result = validate_network_topology(participants)
+
+    assert result.is_connected is True
+    assert result.components == (("main",),)
+
+
+def test_validate_network_topology_detects_disconnected() -> None:
+    """Disconnected components are properly identified."""
+    node_a: NodeConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.NODE,
+        CONF_NAME: "a",
+        SECTION_ROLE: {CONF_IS_SOURCE: False, CONF_IS_SINK: False},
+    }
+    node_b: NodeConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.NODE,
+        CONF_NAME: "b",
+        SECTION_ROLE: {CONF_IS_SOURCE: False, CONF_IS_SINK: False},
+    }
+    grid_a: GridConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.GRID,
+        CONF_NAME: "grid_a",
+        GRID_CONF_CONNECTION: as_connection_target("a"),
+        SECTION_PRICING: {
+            CONF_PRICE_SOURCE_TARGET: np.array([0.30, 0.30]),
+            CONF_PRICE_TARGET_SOURCE: np.array([0.10, 0.10]),
+        },
+        SECTION_POWER_LIMITS: {},
+    }
+    grid_b: GridConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.GRID,
+        CONF_NAME: "grid_b",
+        GRID_CONF_CONNECTION: as_connection_target("b"),
+        SECTION_PRICING: {
+            CONF_PRICE_SOURCE_TARGET: np.array([0.30, 0.30]),
+            CONF_PRICE_TARGET_SOURCE: np.array([0.10, 0.10]),
+        },
+        SECTION_POWER_LIMITS: {},
+    }
+    participants: dict[str, ElementConfigData] = {
+        "node_a": node_a,
+        "node_b": node_b,
+        "grid_a": grid_a,
+        "grid_b": grid_b,
+    }
+
+    result = validate_network_topology(participants)
+
+    assert result.is_connected is False
+    assert result.components == (("a", "grid_a"), ("b", "grid_b"))
+    assert result.num_components == 2
+
+
+@pytest.mark.parametrize("include_grid", [pytest.param(True, id="with_grid"), pytest.param(False, id="without_grid")])
+def test_validate_network_topology_with_battery(include_grid: bool) -> None:
+    """Battery element validation works with and without a grid."""
+    main_node: NodeConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.NODE,
+        CONF_NAME: "main",
+        SECTION_ROLE: {CONF_IS_SOURCE: False, CONF_IS_SINK: False},
+    }
+    grid: GridConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.GRID,
+        CONF_NAME: "grid",
+        GRID_CONF_CONNECTION: as_connection_target("main"),
+        SECTION_PRICING: {
+            CONF_PRICE_SOURCE_TARGET: np.array([0.30, 0.30]),
+            CONF_PRICE_TARGET_SOURCE: np.array([0.10, 0.10]),
+        },
+        SECTION_POWER_LIMITS: {},
+    }
+    battery: BatteryConfigData = {
+        CONF_ELEMENT_TYPE: ElementType.BATTERY,
+        CONF_NAME: "battery",
+        BATTERY_CONF_CONNECTION: as_connection_target("main"),
+        SECTION_STORAGE: {
+            CONF_CAPACITY: np.array([10.0, 10.0, 10.0]),
+            CONF_INITIAL_CHARGE_PERCENTAGE: 0.5,
+        },
+        SECTION_LIMITS: {
+            CONF_MIN_CHARGE_PERCENTAGE: np.array([10.0, 10.0, 10.0]),
+            CONF_MAX_CHARGE_PERCENTAGE: np.array([90.0, 90.0, 90.0]),
+        },
+        SECTION_POWER_LIMITS: {
+            CONF_MAX_POWER_SOURCE_TARGET: np.array([5.0, 5.0]),
+            CONF_MAX_POWER_TARGET_SOURCE: np.array([5.0, 5.0]),
+        },
+        SECTION_PRICING: {
+            CONF_SALVAGE_VALUE: 0.0,
+        },
+        SECTION_EFFICIENCY: {
+            CONF_EFFICIENCY_SOURCE_TARGET: np.array([95.0, 95.0]),
+            CONF_EFFICIENCY_TARGET_SOURCE: np.array([95.0, 95.0]),
+        },
+        SECTION_ADVANCED: {CONF_CHARGE_LIMIT_COST: 100.0},
+    }
+
+    participants: dict[str, ElementConfigData] = {
+        "main_node": main_node,
+        "battery": battery,
+    }
+    if include_grid:
+        participants["grid"] = grid
+
+    result = validate_network_topology(participants)
+
+    assert result.is_connected is True
+    components_str = str(result.components)
+    assert "battery" in components_str
+    assert "main" in components_str
+
+
+def _node(name: str) -> NodeConfigData:
+    return {
+        CONF_ELEMENT_TYPE: ElementType.NODE,
+        CONF_NAME: name,
+        SECTION_ROLE: {CONF_IS_SOURCE: False, CONF_IS_SINK: False},
+    }
+
+
+def _grid(name: str, target: str) -> GridConfigData:
+    return {
+        CONF_ELEMENT_TYPE: ElementType.GRID,
+        CONF_NAME: name,
+        GRID_CONF_CONNECTION: as_connection_target(target),
+        SECTION_PRICING: {
+            CONF_PRICE_SOURCE_TARGET: np.array([0.30, 0.30]),
+            CONF_PRICE_TARGET_SOURCE: np.array([0.10, 0.10]),
+        },
+        SECTION_POWER_LIMITS: {},
+    }
+
+
+def _connection(name: str, source: str, target: str) -> ConnectionConfigData:
+    return {
+        CONF_ELEMENT_TYPE: ElementType.CONNECTION,
+        CONF_NAME: name,
+        SECTION_ENDPOINTS: {
+            CONF_SOURCE: as_connection_target(source),
+            CONF_TARGET: as_connection_target(target),
+        },
+        SECTION_POWER_LIMITS: {},
+        SECTION_PRICING: {},
+        SECTION_EFFICIENCY: {},
+    }
+
+
+def _section(name: str) -> BatterySectionConfigData:
+    return {
+        CONF_ELEMENT_TYPE: ElementType.BATTERY_SECTION,
+        CONF_NAME: name,
+        SECTION_STORAGE: {CONF_CAPACITY: np.array([10.0, 10.0, 10.0]), CONF_INITIAL_CHARGE: 5.0},
+    }
+
+
+@pytest.mark.parametrize(
+    ("participants", "expected"),
+    [
+        pytest.param(
+            [_node("main"), _grid("grid", "main"), _section("section"), _connection("charge", "main", "section")],
+            {},
+            id="node_and_battery_section_endpoints",
+        ),
+        pytest.param(
+            [_node("main"), _grid("grid", "main"), _section("section"), _connection("free", "grid", "section")],
+            {"free": ("grid",)},
+            id="connection_out_of_grid",
+        ),
+        pytest.param(
+            [_node("main"), _grid("grid", "main"), _grid("other", "grid")],
+            {"other": ("grid",)},
+            id="element_targeting_grid",
+        ),
+        pytest.param(
+            [_node("main"), _grid("a", "main"), _grid("b", "main"), _connection("link", "a", "b")],
+            {"link": ("a", "b")},
+            id="connection_between_grids",
+        ),
+    ],
+)
+def test_find_invalid_connection_endpoints(
+    participants: list[ElementConfigData],
+    expected: dict[str, tuple[str, ...]],
+) -> None:
+    """Connections made directly to elements that are never endpoints are reported."""
+    result = find_invalid_connection_endpoints({config[CONF_NAME]: config for config in participants})
+
+    assert result == expected

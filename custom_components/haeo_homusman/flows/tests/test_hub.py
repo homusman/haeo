@@ -1,0 +1,123 @@
+"""Unit tests for hub configuration flow helpers."""
+
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.translation import async_get_translations
+import voluptuous as vol
+
+from custom_components.haeo_homusman.const import DOMAIN
+from custom_components.haeo_homusman.core.const import CONF_DEBOUNCE_SECONDS, CONF_HORIZON, CONF_NAME, HORIZON_PRESET_5_DAYS
+import custom_components.haeo_homusman.flows as flows_module
+from custom_components.haeo_homusman.flows import get_hub_setup_schema
+from custom_components.haeo_homusman.flows.horizon import async_horizon_preset_labels
+from custom_components.haeo_homusman.flows.hub import HubConfigFlow
+
+# Test data for hub flow
+VALID_DATA = [
+    {
+        "description": "Basic hub configuration",
+        "config": {
+            CONF_NAME: "Test Hub",
+        },
+    },
+]
+
+INVALID_DATA = [
+    {
+        "description": "Empty config should fail validation",
+        "config": {},
+        "error": "cannot be empty",
+    },
+]
+
+
+async def test_user_step_translations_loadable(hass: HomeAssistant) -> None:
+    """Test that initial user step translations can be loaded."""
+    translations = await async_get_translations(hass, "en", "config", integrations=[DOMAIN], config_flow=True)
+
+    # Check that key config flow translations exist
+    assert f"component.{DOMAIN}.config.step.user.title" in translations
+    assert f"component.{DOMAIN}.config.step.user.sections.common.name" in translations
+    assert f"component.{DOMAIN}.config.step.user.sections.common.data.name" in translations
+    assert f"component.{DOMAIN}.config.step.user.sections.common.data.horizon" in translations
+
+
+async def test_user_step_form_has_translations(hass: HomeAssistant) -> None:
+    """Test that user step form fields all have translations."""
+    flow = HubConfigFlow()
+    flow.hass = hass
+
+    result = await flow.async_step_user(user_input=None)
+
+    assert result.get("type") == FlowResultType.FORM
+    assert result.get("step_id") == "user"
+
+    # Get translations
+    translations = await async_get_translations(hass, "en", "config", integrations=[DOMAIN], config_flow=True)
+
+    # Verify all form fields have translations
+    data_schema = result.get("data_schema")
+    assert data_schema is not None
+    schema = data_schema.schema
+    for section_key, section_schema in schema.items():
+        section_name = section_key.schema
+        section_translation = f"component.{DOMAIN}.config.step.user.sections.{section_name}.name"
+        assert section_translation in translations, f"Missing section translation '{section_translation}'"
+        for field in section_schema.schema.schema:
+            field_name = field.schema
+            translation_key = f"component.{DOMAIN}.config.step.user.sections.{section_name}.data.{field_name}"
+            assert translation_key in translations, f"Missing translation for field '{field_name}'"
+
+
+async def test_config_error_translations_exist(hass: HomeAssistant) -> None:
+    """Test that error translations can be loaded."""
+    translations = await async_get_translations(hass, "en", "config", integrations=[DOMAIN], config_flow=True)
+    assert f"component.{DOMAIN}.config.error.name_exists" in translations
+    assert f"component.{DOMAIN}.config.error.horizon_entity_invalid" in translations
+    assert f"component.{DOMAIN}.config.error.horizon_entity_from_this_hub" in translations
+
+
+async def test_config_abort_translations_exist(hass: HomeAssistant) -> None:
+    """Test that abort reason translations can be loaded."""
+    translations = await async_get_translations(hass, "en", "config", integrations=[DOMAIN], config_flow=True)
+    assert f"component.{DOMAIN}.config.abort.already_configured" in translations
+
+
+async def test_hub_setup_schema_has_expected_fields(hass: HomeAssistant) -> None:
+    """Test that the hub setup schema has the expected simplified fields."""
+    schema = get_hub_setup_schema(await async_horizon_preset_labels(hass))
+
+    # Get field names from common section
+    common_section = schema.schema[vol.Required(flows_module.HUB_SECTION_COMMON)]
+    field_names = {key.schema for key in common_section.schema.schema}
+
+    # Verify expected fields are present
+    assert CONF_NAME in field_names
+    assert CONF_HORIZON in field_names
+
+    # Verify debounce is NOT in the add flow (only in options/edit)
+    assert CONF_DEBOUNCE_SECONDS not in field_names
+
+
+async def test_hub_setup_schema_labels_horizon_presets(hass: HomeAssistant) -> None:
+    """The horizon presets carry their translated labels, which the nested select cannot look up itself."""
+    schema = get_hub_setup_schema(await async_horizon_preset_labels(hass))
+
+    common_section = schema.schema[vol.Required(flows_module.HUB_SECTION_COMMON)]
+    schema_values = {vol_key.schema: value for vol_key, value in common_section.schema.schema.items()}
+    preset_select = schema_values[CONF_HORIZON].config["choices"]["preset"]["selector"]["select"]
+    assert preset_select["options"] == [
+        {"value": "2_days", "label": "2 days"},
+        {"value": "3_days", "label": "3 days"},
+        {"value": "5_days", "label": "5 days"},
+        {"value": "7_days", "label": "7 days"},
+    ]
+
+
+async def test_hub_setup_schema_default_preset(hass: HomeAssistant) -> None:
+    """Test that the hub setup schema defaults to 5 days preset."""
+    schema = get_hub_setup_schema(await async_horizon_preset_labels(hass))
+
+    common_section = schema.schema[vol.Required(flows_module.HUB_SECTION_COMMON)]
+    schema_keys = {vol_key.schema: vol_key for vol_key in common_section.schema.schema}
+    assert schema_keys[CONF_HORIZON].default() == HORIZON_PRESET_5_DAYS

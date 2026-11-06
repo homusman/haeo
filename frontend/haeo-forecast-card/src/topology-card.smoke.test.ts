@@ -12,7 +12,7 @@ interface TopologyCardConstructor {
 }
 
 interface HaeoTopologyCardElement extends HTMLElement {
-  setConfig: (config: { type: "custom:haeo-topology-card"; title?: string; hub_entry_id?: string }) => void;
+  setConfig: (config: { type: "custom:haeo-homusman-topology-card"; title?: string; hub_entry_id?: string }) => void;
   hass: HassLike | null;
   getCardSize: () => number;
   getGridOptions: () => {
@@ -33,9 +33,9 @@ function findScenarioTopologyState(): { entityId: string; state: Record<string, 
 }
 
 function topologyCardClass(): TopologyCardConstructor {
-  const ctor = customElements.get("haeo-topology-card");
+  const ctor = customElements.get("haeo-homusman-topology-card");
   if (ctor === undefined) {
-    throw new Error("Expected haeo-topology-card custom element");
+    throw new Error("Expected haeo-homusman-topology-card custom element");
   }
   return ctor as unknown as TopologyCardConstructor;
 }
@@ -46,7 +46,7 @@ function scenarioHass(scenario: { entityId: string; state: Record<string, unknow
       [scenario.entityId]: scenario.state as unknown as HassLike["states"][string],
     },
     entities: {
-      [scenario.entityId]: { platform: "haeo", device_id: "dev-alpha" },
+      [scenario.entityId]: { platform: "haeo_homusman", device_id: "dev-alpha" },
     },
     devices: {
       "dev-alpha": { config_entries: [hubEntryId] },
@@ -61,20 +61,20 @@ async function waitForTopologyController(): Promise<void> {
   });
 }
 
-describe("haeo-topology-card smoke", () => {
+describe("haeo-homusman-topology-card smoke", () => {
   afterEach(() => {
     document.body.innerHTML = "";
   });
 
   it("defines the custom element and accepts config", () => {
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     document.body.appendChild(element);
 
-    expect(customElements.get("haeo-topology-card")).toBeDefined();
+    expect(customElements.get("haeo-homusman-topology-card")).toBeDefined();
     expect(element).toBeInstanceOf(HTMLElement);
   });
 
@@ -85,9 +85,9 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     element.hass = scenarioHass(scenario, "hub-alpha");
@@ -98,9 +98,9 @@ describe("haeo-topology-card smoke", () => {
   });
 
   it("renders configure hub message when no hub is available", async () => {
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
     });
     document.body.appendChild(element);
 
@@ -125,7 +125,7 @@ describe("haeo-topology-card smoke", () => {
   });
 
   it("reports grid options from card size", () => {
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     document.body.appendChild(element);
     expect(element.getCardSize()).toBe(7);
     expect(element.getGridOptions()).toEqual({
@@ -143,13 +143,13 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     const updates: Event[] = [];
     element.addEventListener("ll-update", (event) => {
       updates.push(event);
     });
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     element.hass = scenarioHass(scenario, "hub-alpha");
@@ -158,7 +158,7 @@ describe("haeo-topology-card smoke", () => {
     const initialCount = await waitForSettledUpdates(element, updates);
     expect(initialCount).toBeGreaterThan(0);
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     // Asserting that nothing further is dispatched, so this one has to be a settle
@@ -177,9 +177,9 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     element.hass = {
@@ -194,8 +194,8 @@ describe("haeo-topology-card smoke", () => {
         },
       },
       entities: {
-        [scenario.entityId]: { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.other_topology": { platform: "haeo", device_id: "dev-beta" },
+        [scenario.entityId]: { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.other_topology": { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -206,7 +206,7 @@ describe("haeo-topology-card smoke", () => {
     await waitForTopologySvg(element);
 
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-beta",
     });
 
@@ -221,9 +221,9 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       title: "First title",
       hub_entry_id: "hub-alpha",
     });
@@ -232,7 +232,7 @@ describe("haeo-topology-card smoke", () => {
     await waitForTopologySvg(element);
 
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       title: "Second title",
       hub_entry_id: "hub-alpha",
     });
@@ -249,9 +249,9 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
     });
     element.hass = scenarioHass(scenario, "hub-alpha");
     document.body.appendChild(element);
@@ -268,16 +268,16 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     document.body.appendChild(element);
     await waitForTopologyController();
 
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       title: "Updated topology",
       hub_entry_id: "hub-alpha",
     });
@@ -301,9 +301,9 @@ describe("haeo-topology-card smoke", () => {
       throw new Error("Expected scenario topology state");
     }
 
-    const element = document.createElement("haeo-topology-card") as HaeoTopologyCardElement;
+    const element = document.createElement("haeo-homusman-topology-card") as HaeoTopologyCardElement;
     element.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     element.hass = scenarioHass(scenario, "hub-alpha");

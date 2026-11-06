@@ -37,7 +37,7 @@ type Story = StoryObj<StoryArgs>;
 export const Default: Story = {
   render: (args) => {
     const series = normalizeSeries(getScenarioFixture(args.scenario, args.dataMode), {
-      type: "custom:haeo-forecast-card",
+      type: "custom:haeo-homusman-forecast-card",
     });
     return (
       <div>

@@ -24,18 +24,18 @@ from numpy.typing import NDArray
 import pytest
 from pytest_benchmark.fixture import BenchmarkFixture
 
-from custom_components.haeo.core.adapters.network_builder import (
+from custom_components.haeo_homusman.core.adapters.network_builder import (
     ElementUpdater,
     build_element_updaters,
     build_network,
     periods_in_hours,
 )
-from custom_components.haeo.core.data.forecast_times import generate_forecast_timestamps, preset_periods_seconds
-from custom_components.haeo.core.data.loader.config_loader import load_element_configs
-from custom_components.haeo.core.model.network import Network
-from custom_components.haeo.core.schema.elements import ElementConfigData, ElementConfigSchema
-from custom_components.haeo.core.schema.elements.conformance import is_element_config_schema
-from custom_components.haeo.core.state import EntityState
+from custom_components.haeo_homusman.core.data.forecast_times import generate_forecast_timestamps, preset_periods_seconds
+from custom_components.haeo_homusman.core.data.loader.config_loader import load_element_configs
+from custom_components.haeo_homusman.core.model.network import Network
+from custom_components.haeo_homusman.core.schema.elements import ElementConfigData, ElementConfigSchema
+from custom_components.haeo_homusman.core.schema.elements.conformance import is_element_config_schema
+from custom_components.haeo_homusman.core.state import EntityState
 from tools.diag.cli import config_horizon_preset, migrate_participants_for_diag
 
 # ---------------------------------------------------------------------------

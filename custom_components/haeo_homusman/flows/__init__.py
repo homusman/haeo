@@ -1,0 +1,188 @@
+"""Base classes and utilities for HAEO config flows."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+import logging
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from custom_components.haeo_homusman.core.schema.elements import ElementType
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.selector import NumberSelector, NumberSelectorConfig, NumberSelectorMode
+import voluptuous as vol
+
+from custom_components.haeo_homusman.const import CONF_RECORD_FORECASTS
+from custom_components.haeo_homusman.core.const import (
+    CONF_ADVANCED_MODE,
+    CONF_DEBOUNCE_SECONDS,
+    CONF_HORIZON,
+    CONF_NAME,
+    CONF_RELAX_INFEASIBLE,
+    DEFAULT_DEBOUNCE_SECONDS,
+)
+from custom_components.haeo_homusman.core.const import HUB_SECTION_ADVANCED as HUB_SECTION_ADVANCED
+from custom_components.haeo_homusman.core.const import HUB_SECTION_COMMON as HUB_SECTION_COMMON
+from custom_components.haeo_homusman.flows.field_schema import SectionDefinition, build_section_schema
+from custom_components.haeo_homusman.flows.horizon import horizon_field
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def get_hub_setup_schema(preset_labels: Mapping[str, str], suggested_name: str | None = None) -> vol.Schema:
+    """Get simplified schema for initial hub setup.
+
+    Args:
+        preset_labels: Translated label of each horizon preset
+        suggested_name: Optional suggested name for the hub (translatable default)
+
+    Returns:
+        Voluptuous schema with name, planning horizon, and basic settings.
+
+    """
+    name_key = (
+        vol.Required(CONF_NAME, description={"suggested_value": suggested_name})
+        if suggested_name
+        else vol.Required(CONF_NAME)
+    )
+
+    sections = (
+        SectionDefinition(
+            key=HUB_SECTION_COMMON,
+            fields=(CONF_NAME, CONF_HORIZON),
+            collapsed=False,
+        ),
+        SectionDefinition(
+            key=HUB_SECTION_ADVANCED,
+            fields=(CONF_ADVANCED_MODE,),
+            collapsed=True,
+        ),
+    )
+    field_entries = {
+        HUB_SECTION_COMMON: {
+            CONF_NAME: (
+                name_key,
+                vol.All(
+                    str,
+                    vol.Strip,
+                    vol.Length(min=1, msg="Name cannot be empty"),
+                    vol.Length(max=255, msg="Name cannot be longer than 255 characters"),
+                ),
+            ),
+            CONF_HORIZON: horizon_field(preset_labels),
+        },
+        HUB_SECTION_ADVANCED: {
+            CONF_ADVANCED_MODE: (
+                vol.Required(CONF_ADVANCED_MODE, default=False),
+                bool,
+            ),
+        },
+    }
+    return vol.Schema(build_section_schema(sections, field_entries))
+
+
+def get_hub_options_schema(config_entry: ConfigEntry, preset_labels: Mapping[str, str]) -> vol.Schema:
+    """Get simplified schema for hub options (edit) flow.
+
+    Args:
+        config_entry: Config entry to get current values from
+        preset_labels: Translated label of each horizon preset
+
+    Returns:
+        Voluptuous schema with the planning horizon and basic settings.
+
+    """
+    advanced_data = config_entry.data.get(HUB_SECTION_ADVANCED, {})
+
+    sections = (
+        SectionDefinition(
+            key=HUB_SECTION_COMMON,
+            fields=(CONF_HORIZON,),
+            collapsed=False,
+        ),
+        SectionDefinition(
+            key=HUB_SECTION_ADVANCED,
+            fields=(CONF_DEBOUNCE_SECONDS, CONF_ADVANCED_MODE, CONF_RELAX_INFEASIBLE, CONF_RECORD_FORECASTS),
+            collapsed=True,
+        ),
+    )
+    field_entries = {
+        HUB_SECTION_COMMON: {
+            CONF_HORIZON: horizon_field(preset_labels, config_entry.data[HUB_SECTION_COMMON][CONF_HORIZON]),
+        },
+        HUB_SECTION_ADVANCED: {
+            CONF_DEBOUNCE_SECONDS: (
+                vol.Required(
+                    CONF_DEBOUNCE_SECONDS,
+                    default=advanced_data.get(CONF_DEBOUNCE_SECONDS, DEFAULT_DEBOUNCE_SECONDS),
+                ),
+                vol.All(
+                    NumberSelector(
+                        NumberSelectorConfig(min=0, max=30, step=1, mode=NumberSelectorMode.BOX),
+                    ),
+                    vol.Coerce(int),
+                ),
+            ),
+            CONF_ADVANCED_MODE: (
+                vol.Required(
+                    CONF_ADVANCED_MODE,
+                    default=advanced_data.get(CONF_ADVANCED_MODE, False),
+                ),
+                bool,
+            ),
+            CONF_RELAX_INFEASIBLE: (
+                vol.Required(
+                    CONF_RELAX_INFEASIBLE,
+                    default=advanced_data.get(CONF_RELAX_INFEASIBLE, False),
+                ),
+                bool,
+            ),
+            CONF_RECORD_FORECASTS: (
+                vol.Required(
+                    CONF_RECORD_FORECASTS,
+                    default=config_entry.data.get(CONF_RECORD_FORECASTS, False),
+                ),
+                bool,
+            ),
+        },
+    }
+    return vol.Schema(build_section_schema(sections, field_entries))
+
+
+def get_element_flow_classes() -> dict[ElementType, type]:
+    """Return mapping of element types to their config flow handler classes.
+
+    This function performs lazy imports to avoid circular dependencies
+    (flows import adapters, not the other way around).
+    """
+    from custom_components.haeo_homusman.core.schema.elements import ElementType  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.battery import BatterySubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.battery_section import BatterySectionSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.buffer import BufferSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.connection import ConnectionSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.deferrable_load import DeferrableLoadSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.ev import EvSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.grid import GridSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.inverter import InverterSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.junction import JunctionSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.load import LoadSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.node import NodeSubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.policy import PolicySubentryFlowHandler  # noqa: PLC0415
+    from custom_components.haeo_homusman.flows.elements.solar import SolarSubentryFlowHandler  # noqa: PLC0415
+
+    return {
+        ElementType.BATTERY: BatterySubentryFlowHandler,
+        ElementType.BATTERY_SECTION: BatterySectionSubentryFlowHandler,
+        ElementType.BUFFER: BufferSubentryFlowHandler,
+        ElementType.CONNECTION: ConnectionSubentryFlowHandler,
+        ElementType.DEFERRABLE_LOAD: DeferrableLoadSubentryFlowHandler,
+        ElementType.EV: EvSubentryFlowHandler,
+        ElementType.GRID: GridSubentryFlowHandler,
+        ElementType.INVERTER: InverterSubentryFlowHandler,
+        ElementType.LOAD: LoadSubentryFlowHandler,
+        ElementType.JUNCTION: JunctionSubentryFlowHandler,
+        ElementType.NODE: NodeSubentryFlowHandler,
+        ElementType.POLICY: PolicySubentryFlowHandler,
+        ElementType.SOLAR: SolarSubentryFlowHandler,
+    }

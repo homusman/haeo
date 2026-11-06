@@ -60,7 +60,7 @@ const testFixture: HassLike = withSingleHubRegistry({
 });
 
 const testCardConfig = {
-  type: "custom:haeo-forecast-card" as const,
+  type: "custom:haeo-homusman-forecast-card" as const,
   hub_entry_id: "hub-alpha",
   entities: ["sensor.grid_import_power", "sensor.grid_import_price", "sensor.battery_soc"],
 };
@@ -232,7 +232,7 @@ describe("ForecastCardView components", () => {
 
   it("renders loading state before hass registry data is available", () => {
     const store = new ForecastCardStore();
-    store.setConfig({ type: "custom:haeo-forecast-card", hub_entry_id: "hub-alpha" });
+    store.setConfig({ type: "custom:haeo-homusman-forecast-card", hub_entry_id: "hub-alpha" });
     store.setSize(800, 300);
     render(<ForecastCardView store={store} onPointerMove={() => undefined} onPointerLeave={() => undefined} />, root);
     expect(root.textContent).toContain("Loading HAEO forecast data");
@@ -240,7 +240,7 @@ describe("ForecastCardView components", () => {
 
   it("renders hub-not-found when registry data excludes the configured hub", () => {
     const store = new ForecastCardStore();
-    store.setConfig({ type: "custom:haeo-forecast-card", hub_entry_id: "hub-deleted" });
+    store.setConfig({ type: "custom:haeo-homusman-forecast-card", hub_entry_id: "hub-deleted" });
     store.setHass({
       states: {},
       entities: {},
@@ -367,7 +367,7 @@ describe("ForecastCardView components", () => {
 
   it("updates the horizon from the slider", async () => {
     const store = new ForecastCardStore();
-    store.setConfig({ type: "custom:haeo-forecast-card", hub_entry_id: "hub-alpha" });
+    store.setConfig({ type: "custom:haeo-homusman-forecast-card", hub_entry_id: "hub-alpha" });
     store.setHass(loadScenarioHassState("scenario2"));
     store.setSize(900, 380);
     render(<ForecastCardView store={store} onPointerMove={() => undefined} onPointerLeave={() => undefined} />, root);

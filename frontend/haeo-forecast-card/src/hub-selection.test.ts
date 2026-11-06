@@ -21,11 +21,11 @@ describe("hub-selection", () => {
       states: {
         "sensor.haeo_grid_import_power": {
           entity_id: "sensor.haeo_grid_import_power",
-          attributes: { platform: "haeo", forecast: [{ time: "2026-01-01T00:00:00Z", value: 1 }] },
+          attributes: { platform: "haeo_homusman", forecast: [{ time: "2026-01-01T00:00:00Z", value: 1 }] },
         },
       },
       entities: {
-        "sensor.haeo_grid_import_power": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_grid_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -41,16 +41,16 @@ describe("hub-selection", () => {
       states: {
         "sensor.haeo_grid_import_power": {
           entity_id: "sensor.haeo_grid_import_power",
-          attributes: { platform: "haeo", forecast: [{ time: "2026-01-01T00:00:00Z", value: 1 }] },
+          attributes: { platform: "haeo_homusman", forecast: [{ time: "2026-01-01T00:00:00Z", value: 1 }] },
         },
         "sensor.other_hub_import_power": {
           entity_id: "sensor.other_hub_import_power",
-          attributes: { platform: "haeo", forecast: [{ time: "2026-01-01T00:00:00Z", value: 2 }] },
+          attributes: { platform: "haeo_homusman", forecast: [{ time: "2026-01-01T00:00:00Z", value: 2 }] },
         },
       },
       entities: {
-        "sensor.haeo_grid_import_power": { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.other_hub_import_power": { platform: "haeo", device_id: "dev-beta" },
+        "sensor.haeo_grid_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.other_hub_import_power": { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -70,7 +70,7 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.haeo_grid_import_power": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_grid_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -110,8 +110,8 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-zulu" },
-        "sensor.other_status": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-zulu" },
+        "sensor.other_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-zulu": { config_entries: ["hub-zulu"] },
@@ -140,7 +140,7 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.grid_import_power": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.grid_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -170,7 +170,7 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.unrelated_entity": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.unrelated_entity": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -210,9 +210,9 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.grid_import_power": { platform: "haeo" },
-        "sensor.grid_import_price": { platform: "haeo" },
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.grid_import_power": { platform: "haeo_homusman" },
+        "sensor.grid_import_price": { platform: "haeo_homusman" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -254,8 +254,8 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.alpha_import_power": { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.beta_import_power": { platform: "haeo", device_id: "dev-beta" },
+        "sensor.alpha_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.beta_import_power": { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -275,7 +275,7 @@ describe("hub-selection", () => {
     const hass: HassLike = {
       states: {},
       entities: {
-        "sensor.haeo_status": { platform: "haeo" },
+        "sensor.haeo_status": { platform: "haeo_homusman" },
       },
     };
 
@@ -295,8 +295,8 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.alpha_import_power": { platform: "haeo", device_id: "dev-alpha" },
-        "sensor.beta_import_power": { platform: "haeo", device_id: "dev-beta" },
+        "sensor.alpha_import_power": { platform: "haeo_homusman", device_id: "dev-alpha" },
+        "sensor.beta_import_power": { platform: "haeo_homusman", device_id: "dev-beta" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -317,7 +317,7 @@ describe("hub-selection", () => {
       },
       entities: {
         "sensor.other": { platform: "other", device_id: "dev-other" },
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-other": { config_entries: ["hub-other"] },
@@ -340,8 +340,8 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.grid_import_power": { platform: "haeo", device_id: "dev-empty" },
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.grid_import_power": { platform: "haeo_homusman", device_id: "dev-empty" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-empty": { config_entries: [] },
@@ -375,13 +375,13 @@ describe("hub-selection", () => {
         },
         "sensor.custom": {
           entity_id: "sensor.custom",
-          attributes: { platform: "haeo" },
+          attributes: { platform: "haeo_homusman" },
         },
       },
       entities: {
         "sensor.haeo_status": { device_id: "dev-alpha" },
         "sensor.custom": { device_id: "dev-alpha" },
-        "sensor.haeo_registry_only": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_registry_only": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },
@@ -402,9 +402,9 @@ describe("hub-selection", () => {
         },
       },
       entities: {
-        "sensor.missing_state": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.missing_state": { platform: "haeo_homusman", device_id: "dev-alpha" },
         "sensor.other_platform": { platform: "mqtt", device_id: "dev-other" },
-        "sensor.haeo_status": { platform: "haeo", device_id: "dev-alpha" },
+        "sensor.haeo_status": { platform: "haeo_homusman", device_id: "dev-alpha" },
       },
       devices: {
         "dev-alpha": { config_entries: ["hub-alpha"] },

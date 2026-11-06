@@ -7,7 +7,7 @@ describe("config-form", () => {
     const form = buildHubConfigForm();
     const hubField = form.schema.find((field) => field.name === "hub_entry_id");
     expect(hubField?.required).toBe(true);
-    expect(hubField?.selector).toEqual({ config_entry: { integration: "haeo" } });
+    expect(hubField?.selector).toEqual({ config_entry: { integration: "haeo_homusman" } });
     expect(form.computeLabel({ name: "hub_entry_id" })).toBe("HAEO hub");
     expect(form.computeHelper({ name: "hub_entry_id" })).toBe("Select the HAEO system this card should display.");
   });

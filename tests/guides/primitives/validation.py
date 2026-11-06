@@ -24,7 +24,7 @@ def validate_policies(hass: LiveHomeAssistant, *, expected_rules: list[str]) -> 
 
     async def _get_policy_rules() -> list[str]:
         ha = hass.hass
-        entry = next(e for e in ha.config_entries.async_entries("haeo"))
+        entry = next(e for e in ha.config_entries.async_entries("haeo_homusman"))
         policy_sub = next(s for s in entry.subentries.values() if s.subentry_type == "policy")
         return [r["name"] for r in policy_sub.data.get("rules", [])]
 
@@ -38,7 +38,7 @@ def validate_buffer(hass: LiveHomeAssistant, *, name: str, kind: str, participan
 
     async def _get_config() -> tuple[str, dict[str, list[str]]]:
         ha = hass.hass
-        entry = next(e for e in ha.config_entries.async_entries("haeo"))
+        entry = next(e for e in ha.config_entries.async_entries("haeo_homusman"))
         subentry = next(s for s in entry.subentries.values() if s.title == name)
         return str(subentry.data["kind"]), dict(subentry.data["participants"])
 

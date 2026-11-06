@@ -1,5 +1,5 @@
 /**
- * Lightweight topology layout sizing shared by the thin `haeo-topology-card`
+ * Lightweight topology layout sizing shared by the thin `haeo-homusman-topology-card`
  * element and its lazily-loaded rendering controller. Kept dependency-free so
  * the thin element can compute fallback sizes without importing the heavy
  * (ELK-bearing) controller module.

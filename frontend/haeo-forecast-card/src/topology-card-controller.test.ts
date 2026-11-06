@@ -23,7 +23,7 @@ function scenarioHass(scenario: { entityId: string; state: Record<string, unknow
       [scenario.entityId]: scenario.state as unknown as HassLike["states"][string],
     },
     entities: {
-      [scenario.entityId]: { platform: "haeo", device_id: "dev-alpha" },
+      [scenario.entityId]: { platform: "haeo_homusman", device_id: "dev-alpha" },
     },
     devices: {
       "dev-alpha": { config_entries: [hubEntryId] },
@@ -48,7 +48,7 @@ describe("TopologyCardController", () => {
     const controller = new TopologyCardController(host);
 
     controller.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     controller.setHass(scenarioHass(scenario, "hub-alpha"));
@@ -75,7 +75,7 @@ describe("TopologyCardController", () => {
     document.body.appendChild(host);
     const controller = new TopologyCardController(host);
 
-    controller.setConfig({ type: "custom:haeo-topology-card" });
+    controller.setConfig({ type: "custom:haeo-homusman-topology-card" });
     controller.connected();
     expect(host.shadowRoot?.querySelector("#mount")).toBeTruthy();
 
@@ -98,7 +98,7 @@ describe("TopologyCardController", () => {
     });
 
     controller.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       hub_entry_id: "hub-alpha",
     });
     controller.setHass(scenarioHass(scenario, "hub-alpha"));
@@ -106,7 +106,7 @@ describe("TopologyCardController", () => {
 
     const initialCount = await waitForSettledUpdates(host, updates);
     controller.setConfig({
-      type: "custom:haeo-topology-card",
+      type: "custom:haeo-homusman-topology-card",
       title: "Same card size",
       hub_entry_id: "hub-alpha",
     });
@@ -129,7 +129,7 @@ describe("TopologyCardController", () => {
       updates.push(event);
     });
 
-    controller.setConfig({ type: "custom:haeo-topology-card" });
+    controller.setConfig({ type: "custom:haeo-homusman-topology-card" });
     controller.connected();
 
     const onLayoutHeight = (controller as unknown as { onLayoutHeight: (height: number) => void }).onLayoutHeight;
@@ -143,7 +143,7 @@ describe("TopologyCardController", () => {
     document.body.appendChild(host);
     const controller = new TopologyCardController(host);
 
-    controller.setConfig({ type: "custom:haeo-topology-card" });
+    controller.setConfig({ type: "custom:haeo-homusman-topology-card" });
     controller.connected();
     const shadowRoot = host.shadowRoot;
     expect(shadowRoot).toBeTruthy();
@@ -151,6 +151,6 @@ describe("TopologyCardController", () => {
       throw new Error("Expected shadow root");
     }
     vi.spyOn(shadowRoot, "querySelector").mockReturnValue(null);
-    expect(() => controller.setConfig({ type: "custom:haeo-topology-card", title: "Retry" })).not.toThrow();
+    expect(() => controller.setConfig({ type: "custom:haeo-homusman-topology-card", title: "Retry" })).not.toThrow();
   });
 });

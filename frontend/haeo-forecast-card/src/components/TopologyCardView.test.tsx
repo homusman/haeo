@@ -22,7 +22,7 @@ describe("TopologyCardView", () => {
 
     render(
       <TopologyCardView
-        config={{ type: "custom:haeo-topology-card", hub_entry_id: "hub-alpha" }}
+        config={{ type: "custom:haeo-homusman-topology-card", hub_entry_id: "hub-alpha" }}
         hass={hass}
         locale="en"
         onLayoutHeight={() => undefined}
@@ -44,7 +44,7 @@ describe("TopologyCardView", () => {
 
     render(
       <TopologyCardView
-        config={{ type: "custom:haeo-topology-card", hub_entry_id: "hub-alpha" }}
+        config={{ type: "custom:haeo-homusman-topology-card", hub_entry_id: "hub-alpha" }}
         hass={hass}
         locale="en"
         onLayoutHeight={() => undefined}
@@ -63,7 +63,7 @@ describe("TopologyCardView", () => {
 
     render(
       <TopologyCardView
-        config={{ type: "custom:haeo-topology-card", hub_entry_id: "hub-alpha" }}
+        config={{ type: "custom:haeo-homusman-topology-card", hub_entry_id: "hub-alpha" }}
         hass={{ states: {} }}
         locale="en"
         onLayoutHeight={() => undefined}

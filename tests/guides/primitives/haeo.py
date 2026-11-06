@@ -22,12 +22,12 @@ from pathlib import Path
 import types
 from typing import TYPE_CHECKING, get_args
 
-from custom_components.haeo.core.schema.elements.battery import (
+from custom_components.haeo_homusman.core.schema.elements.battery import (
     CONF_CAPACITY,
     CONF_INITIAL_CHARGE_PERCENTAGE,
     CONF_MAX_CHARGE_PERCENTAGE,
 )
-from custom_components.haeo.core.schema.elements.buffer import (
+from custom_components.haeo_homusman.core.schema.elements.buffer import (
     CONF_GENERATION,
     CONF_LEVEL,
     CONF_LOADS,
@@ -37,8 +37,8 @@ from custom_components.haeo.core.schema.elements.buffer import (
     SECTION_PARTICIPANTS,
     BufferKind,
 )
-from custom_components.haeo.core.schema.elements.element_type import ElementType
-from custom_components.haeo.core.schema.elements.ev import (
+from custom_components.haeo_homusman.core.schema.elements.element_type import ElementType
+from custom_components.haeo_homusman.core.schema.elements.ev import (
     CONF_CONNECTED,
     CONF_CURRENT_SOC,
     CONF_ENERGY_PER_DISTANCE,
@@ -50,15 +50,15 @@ from custom_components.haeo.core.schema.elements.ev import (
     SECTION_PUBLIC_CHARGING,
     SECTION_TRIP,
 )
-from custom_components.haeo.core.schema.elements.ev import CONF_MIN_CHARGE_PERCENTAGE as EV_CONF_MIN_CHARGE_PERCENTAGE
-from custom_components.haeo.core.schema.sections import (
+from custom_components.haeo_homusman.core.schema.elements.ev import CONF_MIN_CHARGE_PERCENTAGE as EV_CONF_MIN_CHARGE_PERCENTAGE
+from custom_components.haeo_homusman.core.schema.sections import (
     CONF_FORECAST,
     CONF_MAX_POWER_SOURCE_TARGET,
     CONF_MAX_POWER_TARGET_SOURCE,
     CONF_PRICE_SOURCE_TARGET,
     CONF_PRICE_TARGET_SOURCE,
 )
-from custom_components.haeo.flows.on_off_states import CONF_OFF_STATES, STEP_STATES
+from custom_components.haeo_homusman.flows.on_off_states import CONF_OFF_STATES, STEP_STATES
 
 from .capture import guide_step
 from .ha_page import DEFAULT_TIMEOUT, SEARCH_TIMEOUT
@@ -66,7 +66,7 @@ from .ha_page import DEFAULT_TIMEOUT, SEARCH_TIMEOUT
 if TYPE_CHECKING:
     from homeassistant.util.json import JsonObjectType, JsonValueType
 
-    from custom_components.haeo.elements.input_fields import AnyInputFieldInfo, InputFieldGroups
+    from custom_components.haeo_homusman.elements.input_fields import AnyInputFieldInfo, InputFieldGroups
 
     from .ha_page import HAPage
 
@@ -129,7 +129,7 @@ def _json_str(value: JsonValueType) -> str:
 @functools.cache
 def _load_translations() -> JsonObjectType:
     """Load translations from en.json."""
-    path = Path(__file__).parent.parent.parent.parent / "custom_components" / "haeo" / "translations" / "en.json"
+    path = Path(__file__).parent.parent.parent.parent / "custom_components" / "haeo_homusman" / "translations" / "en.json"
     with path.open(encoding="utf-8") as f:
         return json.load(f)
 
@@ -207,7 +207,7 @@ def _has_none_value(value_type: object) -> bool:
     """Check if NoneValue is part of a union type annotation."""
     if isinstance(value_type, types.UnionType):
         # Avoid circular import with schema module
-        from custom_components.haeo.core.schema import NoneValue  # noqa: PLC0415
+        from custom_components.haeo_homusman.core.schema import NoneValue  # noqa: PLC0415
 
         return NoneValue in get_args(value_type)
     return False
@@ -285,7 +285,7 @@ def _fill_element_fields(
     layout) to ensure correct section expansion behavior.
     """
     # Avoid circular import with elements module
-    from custom_components.haeo.elements import get_input_field_schema_info, get_input_fields  # noqa: PLC0415
+    from custom_components.haeo_homusman.elements import get_input_field_schema_info, get_input_fields  # noqa: PLC0415
 
     input_fields = get_input_fields(element_type)
     field_schema = get_input_field_schema_info(element_type, input_fields)

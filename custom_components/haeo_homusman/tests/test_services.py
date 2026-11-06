@@ -1,0 +1,453 @@
+"""Tests for HAEO service actions."""
+
+from datetime import UTC, datetime
+import json
+from pathlib import Path
+from unittest.mock import AsyncMock, Mock, patch
+
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.loader import Manifest
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.haeo_homusman import HaeoRuntimeData, async_setup
+from custom_components.haeo_homusman.const import CONF_INTEGRATION_TYPE, DOMAIN, INTEGRATION_TYPE_HUB
+from custom_components.haeo_homusman.core.const import CONF_NAME
+from custom_components.haeo_homusman.diagnostics import DIAGNOSTICS_SCHEMA_VERSION, DiagnosticsResult, EnvironmentInfo
+from custom_components.haeo_homusman.services import _format_manifest
+
+
+@pytest.fixture
+def mock_hub_entry(hass: HomeAssistant) -> MockConfigEntry:
+    """Create a mock hub config entry."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_INTEGRATION_TYPE: INTEGRATION_TYPE_HUB,
+            CONF_NAME: "Test Network",
+        },
+        entry_id="test_hub_entry",
+        title="Test HAEO Hub",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_async_setup_registers_services(hass: HomeAssistant) -> None:
+    """Test that async_setup registers HAEO services."""
+    result = await async_setup(hass, {})
+
+    assert result is True
+    assert hass.services.has_service(DOMAIN, "save_diagnostics")
+    assert hass.services.has_service(DOMAIN, "optimize")
+
+
+async def test_save_diagnostics_service_success(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+    tmp_path: Path,
+) -> None:
+    """Test save_diagnostics service writes file successfully."""
+    # Set up the service
+    await async_setup(hass, {})
+
+    # Mock the entry state as loaded
+    mock_hub_entry._async_set_state(hass, ConfigEntryState.LOADED, None)
+    mock_hub_entry.runtime_data = None
+
+    # Mock the diagnostics function
+    mock_diagnostics = DiagnosticsResult(
+        config={"participants": {}},
+        environment=EnvironmentInfo(
+            diagnostics_version=DIAGNOSTICS_SCHEMA_VERSION,
+            ha_version="2024.1.0",
+            haeo_version="0.0.0",
+            timezone="UTC",
+            currency="AUD",
+            diagnostic_request_time="2024-01-01T00:00:00",
+            diagnostic_target_time=None,
+            optimization_start_time="2024-01-01T00:00:00",
+            optimization_end_time="2024-01-01T00:00:01",
+            horizon_start="2024-01-01T00:00:00",
+        ),
+        inputs=[],
+        outputs={},
+        missing_entity_ids=(),
+    )
+
+    # Mock config path to use tmp_path
+    hass.config.config_dir = str(tmp_path)
+
+    with patch(
+        "custom_components.haeo_homusman.diagnostics.collect_diagnostics",
+        new_callable=AsyncMock,
+        return_value=mock_diagnostics,
+    ):
+        # Call the service
+        await hass.services.async_call(
+            DOMAIN,
+            "save_diagnostics",
+            {"config_entry": mock_hub_entry.entry_id},
+            blocking=True,
+        )
+
+    # Verify a file was created in the haeo/diagnostics subdirectory
+    files = list(tmp_path.glob("haeo_homusman/diagnostics/diagnostics_*.json"))
+    assert len(files) == 1
+
+    filename = files[0].name
+    assert filename.startswith("diagnostics_")
+    assert filename.endswith(".json")
+
+    timestamp_part = filename.replace("diagnostics_", "").replace(".json", "")
+    assert len(timestamp_part) == 24
+    assert timestamp_part[4] == "-"
+    assert timestamp_part[7] == "-"
+    assert timestamp_part[10] == "_"
+    assert "." in timestamp_part
+
+    # Verify file content matches Home Assistant's full diagnostics format
+    with files[0].open() as f:
+        saved_data = json.load(f)
+
+    # Check that all expected top-level keys are present
+    assert "home_assistant" in saved_data
+    assert "custom_components" in saved_data
+    assert "integration_manifest" in saved_data
+    assert "setup_times" in saved_data
+    assert "data" in saved_data
+
+    # Verify the actual diagnostics data is in the "data" key
+    assert saved_data["data"] == mock_diagnostics.to_dict()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_key"),
+    [
+        pytest.param("missing_entry", "config_entry_not_found", id="entry_not_found"),
+        pytest.param("wrong_domain", "config_entry_wrong_domain", id="wrong_domain"),
+        pytest.param("not_loaded", "config_entry_not_loaded", id="entry_not_loaded"),
+    ],
+)
+async def test_save_diagnostics_service_validation_errors(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+    scenario: str,
+    expected_key: str,
+) -> None:
+    """save_diagnostics validates config entry references consistently."""
+    await async_setup(hass, {})
+
+    if scenario == "missing_entry":
+        entry_id = "non_existent_entry"
+    elif scenario == "wrong_domain":
+        other_entry = MockConfigEntry(
+            domain="other_integration",
+            data={},
+            entry_id="other_entry_id",
+        )
+        other_entry.add_to_hass(hass)
+        entry_id = other_entry.entry_id
+    else:
+        mock_hub_entry._async_set_state(hass, ConfigEntryState.NOT_LOADED, None)
+        entry_id = mock_hub_entry.entry_id
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN,
+            "save_diagnostics",
+            {"config_entry": entry_id},
+            blocking=True,
+        )
+
+    assert exc_info.value.translation_key == expected_key
+
+
+def test_format_manifest_strips_codeowner_prefix() -> None:
+    """Test that _format_manifest strips @ prefix from codeowners."""
+    manifest: Manifest = {
+        "domain": "haeo_homusman",
+        "name": "HAEO",
+        "codeowners": ["@TrentHouliston", "@BrendanAnnable"],
+        "version": "0.2.1",
+    }
+
+    result = _format_manifest(manifest)
+
+    # Verify @ was stripped from codeowners
+    assert result.get("codeowners") == ["TrentHouliston", "BrendanAnnable"]
+    # Verify original manifest is not modified
+    assert manifest.get("codeowners") == ["@TrentHouliston", "@BrendanAnnable"]
+
+
+def test_format_manifest_no_codeowners() -> None:
+    """Test that _format_manifest handles manifests without codeowners."""
+    manifest: Manifest = {
+        "domain": "haeo_homusman",
+        "name": "HAEO",
+        "version": "0.2.1",
+    }
+
+    result = _format_manifest(manifest)
+
+    # Verify the manifest is returned unchanged (no codeowners key)
+    assert "codeowners" not in result or result.get("codeowners") == manifest.get("codeowners")
+
+
+@pytest.mark.parametrize(
+    ("time", "file_date"),
+    [
+        pytest.param(datetime(2026, 1, 20, 14, 32, 3, tzinfo=UTC), "2026-01-20", id="with_zone"),
+        pytest.param("2026-01-21 01:32:03", "2026-01-21", id="naive_in_ha_zone"),
+    ],
+)
+async def test_save_diagnostics_with_historical_time(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+    tmp_path: Path,
+    time: datetime | str,
+    file_date: str,
+) -> None:
+    """A historical time reaches the collector as that moment, with a time without a zone read in Home Assistant's."""
+    await hass.config.async_set_time_zone("Australia/Sydney")
+    # Set up the service - need to register recorder component first
+    hass.config.components.add("recorder")
+    await async_setup(hass, {})
+
+    # Mock the entry state as loaded
+    mock_hub_entry._async_set_state(hass, ConfigEntryState.LOADED, None)
+    mock_hub_entry.runtime_data = None
+
+    # Mock config path
+    hass.config.config_dir = str(tmp_path)
+
+    target_timestamp = datetime(2026, 1, 20, 14, 32, 3, tzinfo=UTC)
+
+    mock_diagnostics = DiagnosticsResult(
+        config={"participants": {}},
+        environment=EnvironmentInfo(
+            diagnostics_version=DIAGNOSTICS_SCHEMA_VERSION,
+            ha_version="2024.1.0",
+            haeo_version="0.0.0",
+            timezone="UTC",
+            currency="AUD",
+            diagnostic_request_time="2024-01-01T00:00:00",
+            diagnostic_target_time="2026-01-20T14:32:03+00:00",
+            optimization_start_time="2024-01-01T00:00:00",
+            optimization_end_time="2024-01-01T00:00:01",
+            horizon_start="2024-01-01T00:00:00",
+        ),
+        inputs=[{"entity_id": "sensor.test"}],
+        outputs=None,
+        missing_entity_ids=(),
+    )
+
+    with patch(
+        "custom_components.haeo_homusman.diagnostics.collect_diagnostics",
+        new_callable=AsyncMock,
+        return_value=mock_diagnostics,
+    ) as mock_collect:
+        await hass.services.async_call(
+            DOMAIN,
+            "save_diagnostics",
+            {
+                "config_entry": mock_hub_entry.entry_id,
+                "time": time,
+            },
+            blocking=True,
+        )
+
+    mock_collect.assert_called_once()
+    assert mock_collect.call_args.kwargs["target_time"] == target_timestamp
+
+    # The filename uses the historical time as given
+    files = list(tmp_path.glob("haeo_homusman/diagnostics/diagnostics_*.json"))
+    assert len(files) == 1
+    assert file_date in files[0].name
+
+
+async def test_save_diagnostics_time_without_recorder_raises_error(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+) -> None:
+    """A historical time needs the recorder, so without it the action explains why it cannot run."""
+    await async_setup(hass, {})
+    mock_hub_entry._async_set_state(hass, ConfigEntryState.LOADED, None)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN,
+            "save_diagnostics",
+            {"config_entry": mock_hub_entry.entry_id, "time": "2026-01-20T14:32:03+00:00"},
+            blocking=True,
+        )
+
+    assert exc_info.value.translation_key == "recorder_not_loaded"
+
+
+async def test_save_diagnostics_historical_missing_entities_raises_error(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+    tmp_path: Path,
+) -> None:
+    """Test save_diagnostics raises error when historical query has missing entities."""
+    # Set up the service - need to register recorder component first
+    hass.config.components.add("recorder")
+    await async_setup(hass, {})
+
+    # Mock the entry state as loaded
+    mock_hub_entry._async_set_state(hass, ConfigEntryState.LOADED, None)
+    mock_hub_entry.runtime_data = None
+
+    # Mock config path
+    hass.config.config_dir = str(tmp_path)
+
+    target_timestamp = datetime(2025, 1, 1, 12, 0, 0, tzinfo=UTC)
+
+    mock_diagnostics = DiagnosticsResult(
+        config={"participants": {}},
+        environment=EnvironmentInfo(
+            diagnostics_version=DIAGNOSTICS_SCHEMA_VERSION,
+            ha_version="2024.1.0",
+            haeo_version="0.0.0",
+            timezone="UTC",
+            currency="AUD",
+            diagnostic_request_time="2024-01-01T00:00:00",
+            diagnostic_target_time="2026-01-20T14:32:03+00:00",
+            optimization_start_time="2024-01-01T00:00:00",
+            optimization_end_time="2024-01-01T00:00:01",
+            horizon_start="2024-01-01T00:00:00",
+        ),
+        inputs=[],
+        outputs=None,
+        missing_entity_ids=("sensor.battery_soc", "sensor.grid_price"),
+    )
+
+    with (
+        patch(
+            "custom_components.haeo_homusman.diagnostics.collect_diagnostics",
+            new_callable=AsyncMock,
+            return_value=mock_diagnostics,
+        ),
+        pytest.raises(ServiceValidationError) as exc_info,
+    ):
+        await hass.services.async_call(
+            DOMAIN,
+            "save_diagnostics",
+            {
+                "config_entry": mock_hub_entry.entry_id,
+                "time": target_timestamp,
+            },
+            blocking=True,
+        )
+
+    assert exc_info.value.translation_key == "no_history_at_time"
+    # Verify placeholders include time and missing entities
+    placeholders = exc_info.value.translation_placeholders
+    assert placeholders is not None
+    assert "time" in placeholders
+    assert "sensor.battery_soc" in placeholders["missing"]
+    assert "sensor.grid_price" in placeholders["missing"]
+
+
+# ===== Tests for the optimize service =====
+
+
+async def test_optimize_service_success(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+) -> None:
+    """Test optimize service runs optimization successfully."""
+    await async_setup(hass, {})
+
+    # Mock the entry state as loaded
+    mock_hub_entry._async_set_state(hass, ConfigEntryState.LOADED, None)
+
+    # Create a mock coordinator
+    mock_coordinator = AsyncMock()
+    mock_coordinator.async_run_optimization = AsyncMock()
+
+    mock_hub_entry.runtime_data = HaeoRuntimeData(
+        coordinator=mock_coordinator,
+        horizon_manager=Mock(),
+    )
+
+    # Call the service
+    await hass.services.async_call(
+        DOMAIN,
+        "optimize",
+        {"config_entry": mock_hub_entry.entry_id},
+        blocking=True,
+    )
+
+    # Verify optimization was triggered
+    mock_coordinator.async_run_optimization.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_key"),
+    [
+        pytest.param("missing_entry", "config_entry_not_found", id="entry_not_found"),
+        pytest.param("wrong_domain", "config_entry_wrong_domain", id="wrong_domain"),
+        pytest.param("not_loaded", "config_entry_not_loaded", id="entry_not_loaded"),
+    ],
+)
+async def test_optimize_service_validation_errors(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+    scenario: str,
+    expected_key: str,
+) -> None:
+    """Optimize validates config entry references consistently."""
+    await async_setup(hass, {})
+
+    if scenario == "missing_entry":
+        entry_id = "non_existent_entry"
+    elif scenario == "wrong_domain":
+        other_entry = MockConfigEntry(
+            domain="other_integration",
+            data={},
+            entry_id="other_entry_id",
+        )
+        other_entry.add_to_hass(hass)
+        entry_id = other_entry.entry_id
+    else:
+        mock_hub_entry._async_set_state(hass, ConfigEntryState.NOT_LOADED, None)
+        entry_id = mock_hub_entry.entry_id
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN,
+            "optimize",
+            {"config_entry": entry_id},
+            blocking=True,
+        )
+
+    assert exc_info.value.translation_key == expected_key
+
+
+async def test_optimize_service_no_coordinator(
+    hass: HomeAssistant,
+    mock_hub_entry: MockConfigEntry,
+) -> None:
+    """Test optimize raises error when coordinator is not available."""
+    await async_setup(hass, {})
+
+    mock_hub_entry._async_set_state(hass, ConfigEntryState.LOADED, None)
+    # Runtime data with no coordinator
+    mock_hub_entry.runtime_data = HaeoRuntimeData(
+        coordinator=None,
+        horizon_manager=Mock(),
+    )
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await hass.services.async_call(
+            DOMAIN,
+            "optimize",
+            {"config_entry": mock_hub_entry.entry_id},
+            blocking=True,
+        )
+
+    assert exc_info.value.translation_key == "config_entry_not_loaded"

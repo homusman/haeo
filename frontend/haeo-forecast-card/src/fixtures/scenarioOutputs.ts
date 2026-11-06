@@ -12,7 +12,7 @@ function scenarioPath(name: string): string {
 export function withSingleHubRegistry(hass: HassLike, hubEntryId = DEFAULT_TEST_HUB, deviceId = "dev-haeo"): HassLike {
   const entities: NonNullable<HassLike["entities"]> = {};
   for (const entityId of Object.keys(hass.states)) {
-    entities[entityId] = { platform: "haeo", device_id: deviceId };
+    entities[entityId] = { platform: "haeo_homusman", device_id: deviceId };
   }
   return {
     ...hass,

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ForecastCardStore } from "./store";
 import { DEFAULT_TEST_HUB, loadScenarioHassState, withSingleHubRegistry } from "./fixtures/scenarioOutputs";
 
-const testConfig = { type: "custom:haeo-forecast-card" as const, hub_entry_id: DEFAULT_TEST_HUB };
+const testConfig = { type: "custom:haeo-homusman-forecast-card" as const, hub_entry_id: DEFAULT_TEST_HUB };
 
 describe("ForecastCardStore", () => {
   it("holds hass and the series cache by reference without deep-observing them", () => {

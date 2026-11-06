@@ -67,7 +67,7 @@ interface PlotPaths {
 
 export class ForecastCardStore {
   hass: HassLike | null = null;
-  config: ForecastCardConfig = { type: "custom:haeo-forecast-card" };
+  config: ForecastCardConfig = { type: "custom:haeo-homusman-forecast-card" };
   normalizedSeriesCache: ForecastSeries[] = [];
   powerBoundsCache: LaneBounds = { min: -1, max: 1 };
   cardWidth = 640;

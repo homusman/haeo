@@ -1,0 +1,21 @@
+"""Fixtures for config flow tests."""
+
+# Tests drive element-specific flow classes dynamically (per-element step methods,
+# monkeypatched async_create_entry), which a static flow base type cannot express.
+from typing import Any  # noqa: TID251
+
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.haeo_homusman.core.schema.elements import ElementType
+from custom_components.haeo_homusman.flows import get_element_flow_classes
+
+
+def create_flow(hass: HomeAssistant, hub_entry: MockConfigEntry, element_type: ElementType) -> Any:
+    """Create a configured subentry flow instance for an element type."""
+    flow_classes = get_element_flow_classes()
+    flow_class = flow_classes[element_type]
+    flow = flow_class()
+    flow.hass = hass
+    flow.handler = (hub_entry.entry_id, element_type)
+    return flow

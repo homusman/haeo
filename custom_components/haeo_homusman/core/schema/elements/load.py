@@ -1,0 +1,85 @@
+"""Load element schema definitions."""
+
+from typing import Annotated, Final, Literal
+
+from custom_components.haeo_homusman.core.model.const import OutputType
+from custom_components.haeo_homusman.core.schema.elements.element_type import ElementType
+from custom_components.haeo_homusman.core.schema.field_hints import FieldHint, SectionHints, SurfacedPriceHint
+from custom_components.haeo_homusman.core.schema.sections import (
+    CONF_CURTAILMENT,
+    CONF_FORECAST,
+    SECTION_CURTAILMENT,
+    SECTION_FORECAST,
+    ConnectedCommonConfig,
+    ConnectedCommonData,
+    CurtailmentConfig,
+    CurtailmentData,
+    ForecastConfig,
+    ForecastData,
+)
+
+ELEMENT_TYPE = ElementType.LOAD
+
+
+CONF_CONSUMPTION_COST: Final = "consumption_cost"
+
+SURFACED_PRICE_HINTS: Final[dict[str, SurfacedPriceHint]] = {
+    CONF_CONSUMPTION_COST: SurfacedPriceHint(
+        hint=FieldHint(
+            output_type=OutputType.PRICE,
+            time_series=True,
+        ),
+        source_is_wildcard=True,
+        negate=True,
+    ),
+}
+
+
+class LoadConfigSchema(ConnectedCommonConfig):
+    """Load element configuration as stored in Home Assistant."""
+
+    element_type: Literal[ElementType.LOAD]
+    forecast: Annotated[
+        ForecastConfig,
+        SectionHints(
+            {
+                CONF_FORECAST: FieldHint(
+                    output_type=OutputType.POWER,
+                    direction="-",
+                    time_series=True,
+                ),
+            }
+        ),
+    ]
+    curtailment: Annotated[
+        CurtailmentConfig,
+        SectionHints(
+            {
+                CONF_CURTAILMENT: FieldHint(
+                    output_type=OutputType.STATUS,
+                    default_mode="value",
+                    default_value=False,
+                    force_required=True,
+                ),
+            }
+        ),
+    ]
+
+
+class LoadConfigData(ConnectedCommonData):
+    """Load element configuration with loaded values."""
+
+    element_type: Literal[ElementType.LOAD]
+    forecast: ForecastData
+    curtailment: CurtailmentData
+
+
+__all__ = [
+    "CONF_CURTAILMENT",
+    "CONF_FORECAST",
+    "ELEMENT_TYPE",
+    "SECTION_CURTAILMENT",
+    "SECTION_FORECAST",
+    "LoadConfigData",
+    "LoadConfigSchema",
+]
