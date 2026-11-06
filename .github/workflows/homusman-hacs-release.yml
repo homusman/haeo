@@ -1,0 +1,89 @@
+name: Publish HAEO Homusman HACS release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "custom_components/haeo_homusman/**"
+      - ".github/workflows/homusman-hacs-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: homusman-haeo-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Validate standalone domain and Python syntax
+        run: |
+          python -m compileall -q custom_components/haeo_homusman
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path("custom_components/haeo_homusman/manifest.json").read_text())
+          hacs = json.loads(Path("hacs.json").read_text())
+          assert manifest["domain"] == "haeo_homusman"
+          assert hacs["zip_release"] and hacs["filename"] == "haeo_homusman.zip"
+          assert not Path("custom_components/haeo").exists()
+          PY
+      - name: Run economic regression tests
+        run: |
+          python -m pip install "numpy>=2.3.2" "highspy>=1.15.1" "pytest>=9.0.0"
+          python -m pytest -q --noconftest -c /dev/null tests/test_homusman_stability.py
+      - name: Determine and stamp next release version
+        id: version
+        run: |
+          python - <<'PY'
+          import json, os, pathlib, re, subprocess
+          path = pathlib.Path("custom_components/haeo_homusman/manifest.json")
+          manifest = json.loads(path.read_text())
+          current = tuple(map(int, manifest["version"].split(".")))
+          stable = []
+          for tag in subprocess.check_output(["git", "tag", "--list"], text=True).splitlines():
+              match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", tag)
+              if match:
+                  stable.append(tuple(map(int, match.groups())))
+          version = current if not stable or current > max(stable) else (max(stable)[0], max(stable)[1], max(stable)[2] + 1)
+          label = ".".join(map(str, version))
+          manifest["version"] = label
+          path.write_text(json.dumps(manifest, indent=2) + "\n")
+          project = pathlib.Path("pyproject.toml")
+          original = project.read_text()
+          project.write_text(re.sub(r'(?m)^(version = )"[^"]+"$', lambda m: m[1] + '"' + label + '"', original, count=1))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={label}\n")
+          print("Releasing v" + label)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/haeo_homusman/manifest.json pyproject.toml
+          git commit --allow-empty -m "release: v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "refs/tags/v${{ steps.version.outputs.version }}"
+      - name: Package HACS integration
+        run: |
+          cd custom_components/haeo_homusman
+          zip -r -y "${GITHUB_WORKSPACE}/haeo_homusman.zip" . \
+            -x "*/__pycache__/*" "__pycache__/*" "*.pyc" \
+               "*/tests/*" "tests/*"
+      - name: Publish versioned GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            haeo_homusman.zip --repo "${{ github.repository }}" \
+            --target "v${{ steps.version.outputs.version }}" \
+            --title "HAEO - Homusman fork v${{ steps.version.outputs.version }}" \
+            --generate-notes --latest
