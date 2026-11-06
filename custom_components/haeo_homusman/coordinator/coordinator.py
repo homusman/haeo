@@ -1,10 +1,14 @@
 """Data update coordinator for the Home Assistant Energy Optimizer integration."""
 
 import asyncio
+from bisect import bisect_right
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import math
+
+import numpy as np
 import time
 from typing import TYPE_CHECKING, Literal, TypedDict
 
@@ -37,6 +41,8 @@ from custom_components.haeo_homusman.core.adapters.network_builder import (
 from custom_components.haeo_homusman.core.adapters.registry import ELEMENT_TYPES
 from custom_components.haeo_homusman.core.const import (
     CONF_DEBOUNCE_SECONDS,
+    CONF_STABILITY_PENALTY_CENTS,
+    CONF_STABILITY_WINDOW_MINUTES,
     CONF_ELEMENT_TYPE,
     CONF_RELAX_INFEASIBLE,
     DEFAULT_DEBOUNCE_SECONDS,
@@ -405,6 +411,8 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._failure_issue_raised = False
         # Elements whose inputs changed since an optimization last applied them to the network
         self._stale_elements: set[str] = set()
+        # Prior successful plan, aligned by absolute UTC period boundaries.
+        self._previous_battery_plan: dict[str, tuple[list[float], np.ndarray]] = {}
 
         # No update_interval - we're event-driven from input entities
         # No request_refresh_debouncer - we handle debouncing ourselves
@@ -753,6 +761,41 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self.hass, self.config_entry.entry_id, str(self.optimization_error)
             )
 
+    def _stability_references(
+        self, timestamps: Sequence[float], period_count: int
+    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+        """Align the previous successful battery plan to the new UTC horizon."""
+        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
+        penalty_cents = float(advanced.get(CONF_STABILITY_PENALTY_CENTS, 0.0))
+        window_minutes = float(advanced.get(CONF_STABILITY_WINDOW_MINUTES, 60))
+        if not math.isfinite(penalty_cents) or penalty_cents <= 0 or window_minutes <= 0:
+            return {}
+        if len(timestamps) < period_count:
+            return {}
+        current = [float(t) for t in timestamps[:period_count]]
+        anchor = current[0]
+        result = {}
+        for name, (previous_times, previous_power) in self._previous_battery_plan.items():
+            if not previous_times or not len(previous_power):
+                continue
+            reference = np.zeros(period_count)
+            weights = np.zeros(period_count)
+            for index, now in enumerate(current):
+                offset = (now - anchor) / 60.0
+                weight = max(0.0, 1.0 - offset / window_minutes)
+                if weight <= 0 or now < previous_times[0]:
+                    continue
+                previous_index = bisect_right(previous_times, now) - 1
+                if previous_index < 0 or previous_index >= len(previous_power):
+                    continue
+                # After the final previously planned interval, no comparison
+                # exists. The final timestamp is the previous horizon boundary.
+                reference[index] = float(previous_power[previous_index])
+                weights[index] = weight
+            if np.any(weights):
+                result[name] = (reference, weights)
+        return result
+
     async def _async_update_data(self) -> CoordinatorData:
         """Optimize with the inputs as they are now and build the outputs of the plan."""
         start_time = time.time()
@@ -788,7 +831,20 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             network = self._build_network(loaded_configs)
         self._stale_elements.clear()
 
+        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
+        penalty_cents = float(advanced.get(CONF_STABILITY_PENALTY_CENTS, 0.0))
+        network.set_stability_reference(
+            self._stability_references(forecast_timestamps, network.n_periods),
+            penalty_dollars_per_kwh=penalty_cents / 100.0,
+        )
         cost = await self._solve(network, context, started_at, forecast_timestamps)
+        # Store only successful plans. A failed solve must not overwrite the
+        # reference; align by actual UTC timestamps on the next successful run.
+        powers = network.battery_power_snapshot()
+        self._previous_battery_plan = {
+            name: (list(map(float, forecast_timestamps[:len(power)])), power)
+            for name, power in powers.items()
+        }
 
         end_time = time.time()
         self._last_optimization_time = time.monotonic()
