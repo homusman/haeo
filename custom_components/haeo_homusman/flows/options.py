@@ -15,6 +15,8 @@ from custom_components.haeo_homusman.core.const import (
     CONF_DEBOUNCE_SECONDS,
     CONF_HORIZON,
     CONF_RELAX_INFEASIBLE,
+    CONF_STABILITY_PENALTY_CENTS,
+    CONF_STABILITY_WINDOW_MINUTES,
 )
 from custom_components.haeo_homusman.flows.horizon import async_horizon_preset_labels, validate_horizon
 
@@ -50,6 +52,8 @@ def hub_settings_data(entry: ConfigEntry, user_input: Mapping[str, Any]) -> dict
             CONF_DEBOUNCE_SECONDS: advanced[CONF_DEBOUNCE_SECONDS],
             CONF_ADVANCED_MODE: advanced[CONF_ADVANCED_MODE],
             CONF_RELAX_INFEASIBLE: advanced[CONF_RELAX_INFEASIBLE],
+            CONF_STABILITY_PENALTY_CENTS: advanced[CONF_STABILITY_PENALTY_CENTS],
+            CONF_STABILITY_WINDOW_MINUTES: advanced[CONF_STABILITY_WINDOW_MINUTES],
         },
         CONF_RECORD_FORECASTS: advanced.get(CONF_RECORD_FORECASTS, False),
     }
