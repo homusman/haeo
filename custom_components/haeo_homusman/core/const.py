@@ -9,6 +9,8 @@ CONF_NAME: Final = "name"
 # Hub configuration keys
 CONF_DEBOUNCE_SECONDS: Final = "debounce_seconds"
 CONF_RELAX_INFEASIBLE: Final = "relax_infeasible"
+CONF_STABILITY_PENALTY_CENTS: Final = "stability_penalty_cents_per_kwh"
+CONF_STABILITY_WINDOW_MINUTES: Final = "stability_window_minutes"
 CONF_HORIZON: Final = "horizon"
 CONF_HORIZON_PRESET: Final = "horizon_preset"
 CONF_ADVANCED_MODE: Final = "advanced_mode"
