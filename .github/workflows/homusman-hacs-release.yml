@@ -68,10 +68,11 @@ jobs:
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(python -c 'import json; print(json.load(open("custom_components/haeo_homusman/manifest.json"))["version"])')
           git add custom_components/haeo_homusman/manifest.json pyproject.toml
-          git commit --allow-empty -m "release: v${{ steps.version.outputs.version }}"
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "refs/tags/v${{ steps.version.outputs.version }}"
+          git commit --allow-empty -m "release: v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin "refs/tags/v${VERSION}"
       - name: Package HACS integration
         run: |
           cd custom_components/haeo_homusman
