@@ -1,0 +1,45 @@
+name: Convert to standalone Homusman HAEO integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/build_homusman_fork.py
+      - .github/workflows/build-homusman-standalone.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Convert namespace and package
+        run: |
+          python3 scripts/build_homusman_fork.py
+          python3 -m compileall -q custom_components/haeo_homusman
+          test ! -d custom_components/haeo
+          test -f custom_components/haeo_homusman/manifest.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          m = json.loads(Path("custom_components/haeo_homusman/manifest.json").read_text())
+          assert m["domain"] == "haeo_homusman"
+          assert m["name"] == "HAEO - Homusman fork"
+          assert 'custom_components.haeo.' not in Path("custom_components/haeo_homusman/__init__.py").read_text()
+          PY
+      - name: Commit standalone code
+        run: |
+          if test -d custom_components/haeo_homusman && ! test -d custom_components/haeo; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            if ! git diff --cached --quiet; then
+              git commit -m "build: make HAEO Homusman an independent HACS domain"
+              git push
+            fi
+          fi
