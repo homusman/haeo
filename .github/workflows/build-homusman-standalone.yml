@@ -18,6 +18,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Convert namespace and package
         run: |
           python3 scripts/build_homusman_fork.py
