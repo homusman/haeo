@@ -6,7 +6,7 @@ import { defineConfig } from "rolldown";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname);
 const workspaceRoot = resolve(rootDir, "..", "..");
-const outDir = resolve(workspaceRoot, "custom_components", "haeo", "www");
+const outDir = resolve(workspaceRoot, "custom_components", "haeo_homusman", "www");
 const distDir = resolve(rootDir, "dist");
 
 /** Import `.css` files as string literals (matches the previous esbuild `text` loader). */
@@ -54,8 +54,8 @@ export default defineConfig([
     output: {
       dir: outDir,
       format: "esm",
-      entryFileNames: "haeo-forecast-card.min.js",
-      chunkFileNames: "haeo-forecast-card.[name].js",
+      entryFileNames: "haeo-homusman-forecast-card.min.js",
+      chunkFileNames: "haeo-homusman-forecast-card.[name].js",
       sourcemap: false,
       minify: true,
       codeSplitting: true,
@@ -69,8 +69,8 @@ export default defineConfig([
     output: {
       dir: outDir,
       format: "esm",
-      entryFileNames: "haeo-topology-card.min.js",
-      chunkFileNames: "haeo-topology-card.[name].js",
+      entryFileNames: "haeo-homusman-topology-card.min.js",
+      chunkFileNames: "haeo-homusman-topology-card.[name].js",
       sourcemap: false,
       minify: true,
       codeSplitting: true,
