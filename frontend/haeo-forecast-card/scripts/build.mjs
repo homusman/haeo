@@ -9,13 +9,13 @@ import rolldownConfig from "../rolldown.config.mjs";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
 const workspaceRoot = resolve(rootDir, "..", "..");
-const outDir = resolve(workspaceRoot, "custom_components", "haeo", "www");
-const forecastOutFile = resolve(outDir, "haeo-forecast-card.min.js");
-const topologyCardOutFile = resolve(outDir, "haeo-topology-card.min.js");
+const outDir = resolve(workspaceRoot, "custom_components", "haeo_homusman", "www");
+const forecastOutFile = resolve(outDir, "haeo-homusman-forecast-card.min.js");
+const topologyCardOutFile = resolve(outDir, "haeo-homusman-topology-card.min.js");
 const topologyOutFile = resolve(rootDir, "dist", "render-topology-svg.mjs");
 const watch = process.argv.includes("--watch");
 
-const CARD_FILE_PREFIXES = ["haeo-forecast-card", "haeo-topology-card"];
+const CARD_FILE_PREFIXES = ["haeo-homusman-forecast-card", "haeo-homusman-topology-card"];
 
 async function cleanCardOutputDir() {
   await mkdir(outDir, { recursive: true });
