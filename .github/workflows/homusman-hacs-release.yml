@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "custom_components/haeo_homusman/**"
+      - "frontend/haeo-forecast-card/**"
       - ".github/workflows/homusman-hacs-release.yml"
   workflow_dispatch:
 
@@ -42,6 +43,21 @@ jobs:
         run: |
           python -m pip install "numpy>=2.3.2" "highspy>=1.15.1" "typing-extensions>=4" "pytest>=9.0.0"
           python -m pytest -q --noconftest -c /dev/null tests/test_homusman_stability.py
+      - name: Build standalone Lovelace card assets
+        run: |
+          npm --prefix frontend/haeo-forecast-card ci
+          npm --prefix frontend/haeo-forecast-card run build
+          python - <<'PY'
+          from pathlib import Path
+          directory = Path("custom_components/haeo_homusman/www")
+          for name in ("haeo-homusman-forecast-card.min.js", "haeo-homusman-topology-card.min.js"):
+              source = (directory / name).read_text()
+              assert "haeo-homusman" in source, name
+          main = (directory / "haeo-homusman-forecast-card.min.js").read_text()
+          assert "haeo_homusman" in main, "Fork card editor must target fork integration domain"
+          assert "integration:`haeo`" not in main, "Upstream HAEO selector leaked into compiled card"
+          assert not Path("custom_components/haeo").exists()
+          PY
       - name: Determine and stamp next release version
         id: version
         run: |
