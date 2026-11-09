@@ -1,6 +1,8 @@
 """Bounded hub-local history and authenticated, read-only plan retrieval."""
 
-from datetime import UTC
+from asyncio import Lock
+from datetime import UTC, datetime
+from pathlib import Path
 import json
 import logging
 from typing import TYPE_CHECKING
@@ -49,13 +51,17 @@ class PlanHistory:
     """Keep immutable records separate from dispatch-facing data."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
-        self.store = Store(hass, 1, f"{DOMAIN}.plans.{entry_id}", private=True)
+        key = f"{DOMAIN}.plans.{entry_id}"
+        self.store = Store(hass, 1, key, private=True)
+        self.path = Path(hass.config.path(".storage", key))
+        self.hass = hass
+        self.lock = Lock()
         self.accepted: list[dict] = []
         self.latest: dict | None = None
         self.loaded = False
 
-    async def record(self, plan: "CoordinatorData", decision: dict, accepted: bool) -> None:
-        """Keep the latest candidate and save accepted transitions."""
+    async def load(self) -> None:
+        """Load persisted history once under the archive lock."""
         if not self.loaded:
             try:
                 data = await self.store.async_load()
@@ -63,31 +69,76 @@ class PlanHistory:
             except (OSError, ValueError, KeyError):
                 _LOGGER.exception("Could not load archived HAEO plans")
             self.loaded = True
-        record = plan_record(plan, decision)
+    async def record(self, plan: "CoordinatorData", decision: dict, accepted: bool) -> None:
+        """Keep the candidate in memory and archive gated acceptance transitions."""
+        async with self.lock:
+            await self.load()
+            record = plan_record(plan, decision)
+            size = self.record_size(record)
+            self.latest = record if size else None
+            cutoff = plan.boundaries[0] - (plan.boundaries[-1] - plan.boundaries[0])
+            pruned = self.prune(cutoff)
+            if decision["reason"] == "gate_disabled":
+                if self.accepted and not self.accepted[-1].get("ended_at"):
+                    self.accepted[-1]["ended_at"] = datetime.now(UTC).isoformat()
+                    pruned = True
+            elif accepted and self.latest is not None:
+                accepted_at = datetime.now(UTC).isoformat()
+                self.accepted.append({**record, "accepted_at": accepted_at, "size": size})
+                self.prune(cutoff)
+                pruned = True
+            if pruned:
+                await self.save()
+
+    @staticmethod
+    def record_size(record: dict) -> int:
+        """Return the encoded size if the plan can safely be served."""
         try:
-            size = len(json.dumps(record, separators=(",", ":"), allow_nan=False))
+            size = len(json.dumps(record, separators=(",", ":"), allow_nan=False).encode())
         except ValueError:
             _LOGGER.warning("Omitting nonfinite plan from history")
-            return
+            return 0
         if size > MAX_PLAN_BYTES:
             _LOGGER.warning("Omitting plan that exceeds the history size limit")
-            return
-        self.latest = record
-        if not accepted:
-            return
-        self.accepted.append({**record, "accepted_at": record["id"], "size": size})
-        cutoff = plan.boundaries[0] - (plan.boundaries[-1] - plan.boundaries[0])
-        # Keep one predecessor to explain the segment active at the cutoff.
-        while len(self.accepted) > 1 and self.accepted[1]["boundaries"][0] < cutoff:
+            return 0
+        return size
+
+    def prune(self, cutoff: float) -> bool:
+        """Keep the predecessor only while its original horizon can overlap the window."""
+        count = len(self.accepted)
+        while self.accepted:
+            oldest = self.accepted[0]
+            end = oldest["boundaries"][-1]
+            if closed := oldest.get("ended_at"):
+                end = min(end, datetime.fromisoformat(closed).timestamp())
+            if len(self.accepted) > 1:
+                end = min(end, datetime.fromisoformat(self.accepted[1]["accepted_at"]).timestamp())
+            if end > cutoff:
+                break
             self.accepted.pop(0)
-        while len(self.accepted) > 1 and (
-            len(self.accepted) > 256 or sum(plan["size"] for plan in self.accepted) > MAX_BYTES
-        ):
-            self.accepted.pop(0)
+        size = sum(plan["size"] for plan in self.accepted)
+        while len(self.accepted) > 256 or size > MAX_BYTES:
+            size -= self.accepted.pop(0)["size"]
+        return len(self.accepted) != count
+
+    async def save(self) -> None:
+        """Write the current archive."""
         try:
             await self.store.async_save({"accepted": self.accepted})
         except (OSError, ValueError):
             _LOGGER.exception("Could not save archived HAEO plan")
+
+
+    def storage_bytes(self) -> int:
+        """Return the actual size of the on-disk archive file."""
+        try:
+            return self.path.stat().st_size
+        except FileNotFoundError:
+            return 0
+
+    async def diagnostics(self) -> dict[str, int]:
+        """Return the number of saved plans and actual on-disk bytes."""
+        return {"plans": len(self.accepted), "bytes": await self.hass.async_add_executor_job(self.storage_bytes)}
 
 
 @websocket_api.websocket_command({
@@ -95,6 +146,7 @@ class PlanHistory:
     vol.Required("entry_id"): str,
     vol.Optional("plan_id"): str,
     vol.Optional("before"): str,
+    vol.Optional("purge"): bool,
 })
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -107,19 +159,37 @@ async def websocket_plans(hass: HomeAssistant, connection: websocket_api.ActiveC
         connection.send_error(msg["id"], "not_found", "HAEO Homusman hub unavailable")
         return
     history = coordinator.plan_history
+    async with history.lock:
+        await history.load()
+        if msg.get("purge"):
+            await history.store.async_remove()
+            history.accepted.clear()
+            connection.send_result(msg["id"], {"plans": [], "archive": await history.diagnostics()})
+            return
+        response = await plans_response(history, coordinator.plan_decision, msg)
+    if response is None:
+        connection.send_error(msg["id"], "not_found", "Plan unavailable")
+    else:
+        connection.send_result(msg["id"], response)
+
+
+async def plans_response(history: PlanHistory, decision: dict, msg: dict) -> dict | None:
+    """Return a plan or a bounded page of archive metadata."""
     if plan_id := msg.get("plan_id"):
         record = history.latest if plan_id == "candidate" else next(
             (record for record in history.accepted if record["id"] == plan_id), None
         )
-        if record is None:
-            connection.send_error(msg["id"], "not_found", "Plan unavailable")
-        else:
-            connection.send_result(msg["id"], record)
-        return
+        return record
     records = [
-        {key: record[key] for key in ("id", "accepted_at", "decision")}
+        {
+            "id": record["id"],
+            "accepted_at": record["accepted_at"],
+            "ended_at": record.get("ended_at"),
+            "ends": record["boundaries"][-1],
+            "decision": record["decision"],
+        }
         for record in reversed(history.accepted)
         if not msg.get("before") or record["id"] < msg["before"]
     ][:PAGE_SIZE]
-    connection.send_result(msg["id"], {"plans": records, "decision": coordinator.plan_decision})
+    return {"plans": records, "decision": decision, "archive": await history.diagnostics()}
 

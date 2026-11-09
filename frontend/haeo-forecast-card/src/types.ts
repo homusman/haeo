@@ -7,6 +7,7 @@ export interface ForecastCardConfig {
   title?: string;
   hub_entry_id?: string;
   entities?: string[];
+  actual_entities?: Record<string, string>;
   power_display_mode?: PowerDisplayMode;
   default_horizon?: DefaultHorizonPreset;
   tooltip_visible?: boolean;

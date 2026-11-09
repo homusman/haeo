@@ -1,5 +1,6 @@
 import type { JSX } from "preact";
 
+import { HistoryLayer } from "./HistoryLayer";
 import { AxesGrid } from "./AxesGrid";
 import { OverlayLineLayer } from "./OverlayLineLayer";
 import { PowerStackLayer } from "./PowerStackLayer";
@@ -121,19 +122,22 @@ const PlotViewport = observer(function PlotViewport(props: { store: ForecastCard
       overflow="hidden"
     >
       <g transform={`translate(${-store.margins.left} ${-store.plotTop})`}>
-        {store.previewPlan?.accepted_at && (
-          <line
-            x1={store.xScale(Date.parse(store.previewPlan.accepted_at))}
-            x2={store.xScale(Date.parse(store.previewPlan.accepted_at))}
-            y1={store.plotTop}
-            y2={store.plotBottom}
-            stroke="currentColor"
-            stroke-dasharray="2 4"
-          />
-        )}
-        <WindowLayer store={store} />
-        <PowerLayer store={store} />
-        <OverlayLayers store={store} />
+        <defs>
+          <clipPath id={`future-${store.instanceId}`}>
+            <rect
+              x={store.historyReady ? store.xScale(store.historyClock) : store.margins.left}
+              y={store.plotTop}
+              width={plotWidth}
+              height={plotHeight}
+            />
+          </clipPath>
+        </defs>
+        <g clip-path={`url(#future-${store.instanceId})`}>
+          <WindowLayer store={store} />
+          <PowerLayer store={store} />
+          <OverlayLayers store={store} />
+        </g>
+        <HistoryLayer store={store} />
         <HoverOverlay store={store} />
       </g>
     </svg>

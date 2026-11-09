@@ -7,7 +7,7 @@ import { classifyPowerSeries, isPowerPotentialSeries, powerPairKey } from "./pow
 import { normalizeSeries } from "./series";
 import { type WindowBand, windowBands } from "./window-bands";
 import type { HassLike } from "./series";
-import type { PlanDetail } from "./plan-view";
+import type { PlanDetail, PlanSegment, RecorderState } from "./plan-view";
 import type { LineSvgPath, PowerShape } from "./store-paths";
 import { computeHoveredPowerKeys, computePowerShapes, computePricePaths, computeSocPaths } from "./store-paths";
 import { buildTooltipRows, type TooltipSectionId } from "./tooltip-helpers";
@@ -69,7 +69,13 @@ interface PlotPaths {
 export class ForecastCardStore {
   hass: HassLike | null = null;
   config: ForecastCardConfig = { type: "custom:haeo-homusman-forecast-card" };
-  previewPlan: PlanDetail | null = null;
+  pastHours = 0;
+  historyClock = Date.now();
+  historyReady = false;
+  candidatePreview: PlanDetail | null = null;
+  segments: PlanSegment[] = [];
+  historyDetails: Record<string, PlanDetail> = {};
+  actuals: Record<string, RecorderState[]> = {};
   normalizedSeriesCache: ForecastSeries[] = [];
   powerBoundsCache: LaneBounds = { min: -1, max: 1 };
   cardWidth = 640;
@@ -101,7 +107,10 @@ export class ForecastCardStore {
       // Both are replaced wholesale and never mutated in place. Deep-observing
       // Home Assistant's whole state tree on every update blocks the main thread.
       hass: observable.ref,
-      previewPlan: observable.ref,
+      segments: observable.ref,
+      candidatePreview: observable.ref,
+      historyDetails: observable.ref,
+      actuals: observable.ref,
       normalizedSeriesCache: observable.ref,
       instanceId: false,
       plotPathsSnapshot: false,
@@ -125,13 +134,39 @@ export class ForecastCardStore {
     this.refreshNormalizedSeries();
   }
 
-  setPreviewPlan(plan: PlanDetail | null): void {
-    this.previewPlan = plan;
-    this.refreshNormalizedSeries();
+  setPastHours(hours: number): void {
+    this.pastHours = Math.min(this.historyLimitHours, Math.max(0, hours));
+  }
+
+  setHistoryClock(now: number): void {
+    this.historyClock = now;
+    this.historyReady = true;
+  }
+
+  setCandidatePreview(plan: PlanDetail | null): void {
+    this.candidatePreview = plan;
+  }
+
+  setSegments(segments: PlanSegment[]): void {
+    this.segments = segments;
+    const ids = new Set(segments.map((segment) => segment.plan.id));
+    this.historyDetails = Object.fromEntries(Object.entries(this.historyDetails).filter(([id]) => ids.has(id)));
+  }
+
+  addHistoryDetail(detail: PlanDetail): void {
+    this.historyDetails = { ...this.historyDetails, [detail.id]: detail };
+  }
+
+  setActuals(actuals: Record<string, RecorderState[]>): void {
+    this.actuals = actuals;
   }
 
   setConfig(config: ForecastCardConfig): void {
-    if (this.config.hub_entry_id !== config.hub_entry_id) this.previewPlan = null;
+    if (this.config.hub_entry_id !== config.hub_entry_id) {
+      this.setSegments([]);
+      this.setCandidatePreview(null);
+      this.setActuals({});
+    }
     this.config = config;
     this.applyConfigDefaults();
     this.refreshNormalizedSeries();
@@ -390,7 +425,15 @@ export class ForecastCardStore {
 
   get selectedXDomain(): Domain {
     const domain = this.fullXDomain;
-    if (this.horizonDurationMs === null || this.previewPlan !== null) {
+    if (this.historyReady) {
+      const now = this.historyClock;
+      return {
+        min: now - this.pastHours * HOUR_MS,
+        max: this.horizonDurationMs === null ? Math.max(now + MINUTE_MS, domain.max) : now + this.horizonDurationMs,
+        step: domain.step,
+      };
+    }
+    if (this.horizonDurationMs === null) {
       return domain;
     }
     const horizonMax = domain.min + this.horizonDurationMs;
@@ -401,7 +444,39 @@ export class ForecastCardStore {
     };
   }
 
+  get historyLimitHours(): number {
+    const domain = this.fullXDomain;
+    return Math.max(1, Math.min(168, Math.ceil((domain.max - domain.min) / HOUR_MS)));
+  }
+
+  get hoveredPlan(): PlanSegment | null {
+    if (
+      !this.pastHours ||
+      this.pointerX === null ||
+      this.pointerY === null ||
+      this.pointerY < this.plotTop ||
+      this.pointerY > this.plotBottom
+    )
+      return null;
+    const width = this.width - this.margins.left - this.margins.right;
+    const ratio = (this.pointerX - this.margins.left) / width;
+    if (ratio < 0 || ratio > 1) return null;
+    const domain = this.selectedXDomain;
+    const time = domain.min + ratio * (domain.max - domain.min);
+    return this.segments.find((segment) => segment.start <= time && time < segment.end) ?? null;
+  }
+
   get xDomain(): Domain {
+    const plan = this.hoveredPlan;
+    if (plan) {
+      const domain = this.selectedXDomain;
+      const first = this.historyDetails[plan.plan.id]?.boundaries[0];
+      return {
+        ...domain,
+        min: first === undefined ? domain.min : Math.min(domain.min, first * 1000),
+        max: Math.max(domain.max, plan.plan.ends * 1000),
+      };
+    }
     const animation = this.horizonAnimation;
     if (animation === null) {
       return this.selectedXDomain;
@@ -520,11 +595,12 @@ export class ForecastCardStore {
     const { min, max } = this.xDomain;
     const innerWidth = this.width - this.margins.left - this.margins.right;
     const ratio = innerWidth > 0 ? (x - this.margins.left) / innerWidth : 0;
-    return min + ratio * (max - min);
+    const time = min + ratio * (max - min);
+    return this.historyReady && time < this.historyClock && !this.hoveredPlan ? null : time;
   }
 
   get panelTimeMs(): number {
-    return this.hoverTimeMs ?? this.xDomain.min;
+    return this.hoverTimeMs ?? (this.historyReady ? this.historyClock : this.xDomain.min);
   }
 
   get hoverX(): number | null {
@@ -741,22 +817,7 @@ export class ForecastCardStore {
   }
 
   private refreshNormalizedSeries(): void {
-    const currentSeries = normalizeSeries(this.hass, this.config);
-    const nextSeries =
-      this.previewPlan === null
-        ? currentSeries
-        : currentSeries.flatMap((item) => {
-            const name = this.hass?.states[item.entityId]?.attributes["element_name"];
-            const points = typeof name === "string" ? this.previewPlan?.series[name]?.[item.outputName] : undefined;
-            if (!points || points.length < 2) return [];
-            return [
-              {
-                ...item,
-                times: Float64Array.from(points, ([time]) => time * 1000),
-                values: Float64Array.from(points, ([, value]) => value),
-              },
-            ];
-          });
+    const nextSeries = normalizeSeries(this.hass, this.config);
 
     this.normalizedSeriesCache = nextSeries;
     this.seriesDataRevision += 1;

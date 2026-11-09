@@ -1,7 +1,7 @@
 import type { JSX } from "preact";
 import { mdiIcons } from "../mdi-icons";
 
-import { PlanControls } from "../plan-view";
+import { HistoricPlanInfo, PlanControls } from "../plan-view";
 import { ChartSvg } from "./ChartSvg";
 import { Legend } from "./Legend";
 import { Tooltip } from "./Tooltip";
@@ -181,7 +181,11 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
             <div className="empty">{t(props.store.locale, "card.empty.no_data")}</div>
           )}
         </div>
-        {props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />}
+        {props.store.hoveredPlan ? (
+          <HistoricPlanInfo store={props.store} />
+        ) : (
+          props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />
+        )}
       </div>
       {props.store.hasData && <LegendSection store={props.store} />}
     </ha-card>

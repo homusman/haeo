@@ -1,12 +1,14 @@
 """Exercise fork coordinator initialization through the first optimization."""
 
 import asyncio
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
 from custom_components.haeo_homusman.coordinator import HaeoDataUpdateCoordinator
+from custom_components.haeo_homusman.coordinator.plan_history import PlanHistory
 from custom_components.haeo_homusman.core.const import (
     CONF_FORECAST_CONFIDENCE_ENABLED,
     CONF_PLAN_GATE_ENABLED,
@@ -62,3 +64,26 @@ def test_initialize_then_optimize(enabled: bool) -> None:
 
     asyncio.run(run())
 
+
+
+def test_ungated_ticks_do_not_grow_archive(tmp_path) -> None:
+    """A gate transition closes the last segment once, without archiving ungated solves."""
+    async def run() -> None:
+        hass = Mock()
+        hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
+        history = PlanHistory(hass, "test")
+        history.store = Mock(async_load=AsyncMock(return_value=None), async_save=AsyncMock())
+        now = datetime.now(UTC)
+        plan = SimpleNamespace(outputs={}, completed_at=now, boundaries=(now.timestamp(), now.timestamp() + 3600))
+        await history.record(plan, {"reason": "gate_disabled"}, True)
+        history.store.async_save.assert_not_awaited()
+        assert not history.accepted
+        await history.record(plan, {"reason": "bootstrap"}, True)
+        assert len(history.accepted) == 1
+        await history.record(plan, {"reason": "gate_disabled"}, True)
+        await history.record(plan, {"reason": "gate_disabled"}, True)
+        assert len(history.accepted) == 1
+        assert history.accepted[0]["ended_at"]
+        assert history.store.async_save.await_count == 2
+
+    asyncio.run(run())
