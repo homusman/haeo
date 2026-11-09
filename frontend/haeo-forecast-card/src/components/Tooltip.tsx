@@ -63,7 +63,7 @@ export function Tooltip(props: TooltipProps): JSX.Element | null {
             <i /> Current
           </span>
           <span>
-            <i className="historicSwatch" /> Compared
+            <i className="historicSwatch" /> Pinned plan
           </span>
           <span>
             <i className="measuredSwatch" /> Measured

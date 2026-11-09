@@ -2,6 +2,11 @@ import { entityIdsForHub } from "./hub-selection";
 import type { HassLike } from "./series";
 import type { ForecastCardConfig, ForecastSeries } from "./types";
 
+export interface PowerMeasurement {
+  entity_id: string;
+  inverted: boolean;
+}
+
 const inputForOutput: Readonly<Record<string, string>> = {
   battery_state_of_charge: "initial_charge_percentage",
   ev_state_of_charge: "current_soc",
@@ -12,7 +17,8 @@ const inputForOutput: Readonly<Record<string, string>> = {
 export function discoverActualSources(
   hass: HassLike | null,
   config: ForecastCardConfig,
-  series: ForecastSeries[]
+  series: ForecastSeries[],
+  measurements: Record<string, PowerMeasurement> = {}
 ): Record<string, string> {
   if (!hass || !config.hub_entry_id) return { ...config.actual_entities };
   const hubIds = entityIdsForHub(hass, config.hub_entry_id);
@@ -21,16 +27,10 @@ export function discoverActualSources(
   for (const item of series) {
     const attributes = hass.states[item.entityId]?.attributes;
     if (!attributes) continue;
-    if (item.outputName === "battery_power_charge" || item.outputName === "battery_power_discharge") {
-      const battery = hubIds.find((id) => {
-        const source = hass.states[id]?.attributes;
-        return (
-          source?.["element_name"] === attributes["element_name"] &&
-          source?.["element_type"] === "battery" &&
-          source?.["output_name"] === "battery_power_active"
-        );
-      });
-      if (battery) sources[item.entityId] = battery;
+    const name = attributes["element_name"];
+    const measurement = typeof name === "string" ? measurements[name] : undefined;
+    if (item.lane === "power" && item.sourceRole === "output" && measurement) {
+      sources[item.entityId] = measurement.entity_id;
       continue;
     }
     const field = inputForOutput[item.outputName];

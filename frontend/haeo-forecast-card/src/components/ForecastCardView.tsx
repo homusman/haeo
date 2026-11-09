@@ -215,15 +215,21 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           Price range ± per kWh
           <input
             aria-label="Price range"
-            type="number"
-            min={0.05}
-            step="any"
-            value={props.store.priceRange ?? 2}
-            onChange={(event) => props.store.setAxisRange("price", Number(event.currentTarget.value))}
+            type="text"
+            inputMode="decimal"
+            defaultValue={String(props.store.priceRange ?? 2)}
+            onBlur={(event) => {
+              const field = event.currentTarget;
+              props.store.setAxisRange("price", Number(field.value.trim().replace(",", ".")));
+              field.value = String(props.store.priceRange ?? 2);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
           />
         </label>
       </div>
-      <div className="chartRow">
+      <div className="chartRow primaryChart">
         <div className="chartContainer">
           {props.store.hasData ? (
             <ChartSection
@@ -234,10 +240,25 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           ) : (
             <div className="empty">{t(props.store.locale, "card.empty.no_data")}</div>
           )}
-          <HistoricPlanInfo store={props.store} />
         </div>
         {props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />}
       </div>
+      {pinned && (
+        <div className="chartRow comparisonChart">
+          <div className="chartContainer">
+            <ChartSvg
+              store={props.store}
+              comparison
+              onPointerMove={props.onPointerMove}
+              onPointerLeave={props.onPointerLeave}
+            />
+          </div>
+          {props.store.hasData && props.store.tooltipVisible && (
+            <div className="tooltip comparisonSpacer" aria-hidden="true" />
+          )}
+        </div>
+      )}
+      {pinned && <HistoricPlanInfo store={props.store} />}
       {props.store.hasData && <LegendSection store={props.store} />}
       <PlanControls key={props.store.config.hub_entry_id} store={props.store} />
     </ha-card>

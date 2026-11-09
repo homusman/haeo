@@ -2,7 +2,7 @@ import { actualPoints } from "../actual-points";
 import type { JSX } from "preact";
 import { linePath, stepPath } from "../geometry";
 import { observer } from "../mobx-observer";
-import { archivedSeries, clipPlanPoints, type Point } from "../archived-series";
+import { archivedSeries, type Point } from "../archived-series";
 import { OverlayLineLayer } from "./OverlayLineLayer";
 import { PowerStackLayer } from "./PowerStackLayer";
 import { powerValueForDisplay } from "../power-display";
@@ -45,50 +45,37 @@ export const HistoryLayer = observer(function HistoryLayer({
 }): JSX.Element | null {
   if (!store.pastHours) return null;
   const { min, max } = store.xDomain;
-  const selected = store.hoveredPlan;
-  const comparison = selected ? store.historyDetails[selected.plan.id] : undefined;
   const visible = store.visibleSeries.filter(({ lane }) => lane === "power" || lane === "price" || lane === "soc");
   return (
     <g className="historyLayer" pointer-events="none">
       {store.segments.map(({ plan, start, end }) => {
         const detail = store.historyDetails[plan.id];
         if (!detail) return null;
-        const isPreview = comparison?.id === plan.id;
-        const ranges = isPreview
-          ? [[min, store.candidatePreview ? Math.min(max, store.historyClock) : max]]
-          : comparison
-            ? [
-                [start, Math.min(end, comparison.boundaries[0]! * 1000)],
-                [Math.max(start, comparison.boundaries.at(-1)! * 1000), end],
-              ]
-            : [[start, end]];
-        return ranges.map(([from, to], index) => {
-          const series = archivedSeries(visible, store.hass, detail, Math.max(min, from!), Math.min(max, to!));
-          if (!series.length) return null;
-          const shapes = store.pathsForSeries(series);
-          return (
-            <g key={plan.id + index} opacity={isPreview ? 0.55 : undefined}>
-              <PowerStackLayer
-                shapes={shapes.powerShapes}
-                highlightedSeries={store.highlightedSeries}
-                hoveredSeriesKeys={new Set()}
-                focusedSeriesKeys={store.focusedLegendSeriesKeys}
-              />
-              <OverlayLineLayer
-                paths={shapes.pricePaths}
-                highlightedSeries={store.highlightedSeries}
-                focusedSeriesKeys={store.focusedLegendSeriesKeys}
-                cssClass="priceLine"
-              />
-              <OverlayLineLayer
-                paths={shapes.socPaths}
-                highlightedSeries={store.highlightedSeries}
-                focusedSeriesKeys={store.focusedLegendSeriesKeys}
-                cssClass="socLine"
-              />
-            </g>
-          );
-        });
+        const series = archivedSeries(visible, store.hass, detail, Math.max(min, start), Math.min(max, end));
+        if (!series.length) return null;
+        const shapes = store.pathsForSeries(series);
+        return (
+          <g key={plan.id}>
+            <PowerStackLayer
+              shapes={shapes.powerShapes}
+              highlightedSeries={store.highlightedSeries}
+              hoveredSeriesKeys={new Set()}
+              focusedSeriesKeys={store.focusedLegendSeriesKeys}
+            />
+            <OverlayLineLayer
+              paths={shapes.pricePaths}
+              highlightedSeries={store.highlightedSeries}
+              focusedSeriesKeys={store.focusedLegendSeriesKeys}
+              cssClass="priceLine"
+            />
+            <OverlayLineLayer
+              paths={shapes.socPaths}
+              highlightedSeries={store.highlightedSeries}
+              focusedSeriesKeys={store.focusedLegendSeriesKeys}
+              cssClass="socLine"
+            />
+          </g>
+        );
       })}
       {visible.map((series) => {
         const points = actualPoints(store, series);
@@ -102,23 +89,6 @@ export const HistoryLayer = observer(function HistoryLayer({
           />
         );
       })}
-      {selected &&
-        !store.candidatePreview &&
-        visible
-          .filter((series) => store.actualSources[series.entityId])
-          .map((series) => {
-            const points: Point[] = Array.from(series.times, (time, index) => [time, series.values[index]!]);
-            const clipped = clipPlanPoints(points, store.historyClock, max, series.drawType === "line");
-            return (
-              <path
-                key={series.key}
-                d={path(store, series, clipped)}
-                fill="none"
-                stroke={series.color}
-                stroke-width={2}
-              />
-            );
-          })}
       {store.segments
         .flatMap(({ start, end }) => [start, end])
         .filter((time, i, times) => times.indexOf(time) === i)

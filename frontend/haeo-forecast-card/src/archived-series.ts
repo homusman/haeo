@@ -4,8 +4,13 @@ import type { ForecastSeries } from "./types";
 
 export type Point = [number, number];
 
-function planPoints(name: string | undefined, plan: PlanDetail, series: ForecastSeries): Point[] {
-  const points = typeof name === "string" ? plan.series[name]?.[series.outputName] : undefined;
+function planPoints(name: string | undefined, field: unknown, plan: PlanDetail, series: ForecastSeries): Point[] {
+  const points =
+    name === undefined
+      ? undefined
+      : typeof field === "string"
+        ? plan.inputs?.[name]?.[field]
+        : plan.series[name]?.[series.outputName];
   if (!points?.length) return [];
   const result: Point[] = points.map(([time, value]) => [time * 1000, Number(value)]);
   const last = result.at(-1)!;
@@ -37,8 +42,9 @@ export function archivedSeries(
   to?: number
 ): ForecastSeries[] {
   return series.flatMap((item) => {
-    const name = hass?.states[item.entityId]?.attributes["element_name"];
-    const raw = planPoints(typeof name === "string" ? name : undefined, plan, item);
+    const attrs = hass?.states[item.entityId]?.attributes;
+    const name = attrs?.["element_name"];
+    const raw = planPoints(typeof name === "string" ? name : undefined, attrs?.["field_path"], plan, item);
     const points =
       from === undefined || to === undefined ? raw : clipPlanPoints(raw, from, to, item.drawType === "line");
     if (points.length < 2) return [];

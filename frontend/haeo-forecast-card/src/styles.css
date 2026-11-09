@@ -531,16 +531,25 @@ ha-card {
   width: 5rem;
 }
 .historicPlanInfo {
-  position: absolute;
-  top: 0.35rem;
-  left: 0.75rem;
-  max-width: min(75%, 24rem);
+  flex: 0 0 auto;
+  margin: 0.35rem 0.75rem;
   padding: 0.35rem 0.55rem;
+  border: 1px solid var(--haeo-divider);
   border-radius: 0.4rem;
-  background: var(--card-background-color, white);
-  border: 1px solid var(--divider-color, #bbb);
   font-size: 0.75rem;
-  pointer-events: none;
+}
+.comparisonSpacer {
+  visibility: hidden;
+}
+.chartRow {
+  flex: 1 1 220px;
+}
+.chartContainer {
+  min-height: 220px;
+}
+.chartContainer > svg {
+  position: absolute;
+  inset: 0;
 }
 
 .comparisonLegend {
@@ -574,4 +583,17 @@ ha-card {
 .optimizerSummary {
   flex-basis: 100%;
   font-size: 0.8rem;
+}
+
+@container (max-width: 768px) {
+  .chartRow {
+    flex: 1 1 auto;
+  }
+  .chartContainer {
+    flex: 1 1 220px;
+    height: auto;
+  }
+  .comparisonSpacer {
+    display: none;
+  }
 }

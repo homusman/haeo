@@ -23,7 +23,7 @@ def test_initialize_then_optimize(enabled: bool) -> None:
         coordinator = object.__new__(HaeoDataUpdateCoordinator)
         coordinator.hass = Mock()
         coordinator.hass.async_add_executor_job = AsyncMock(return_value=("bootstrap", None))
-        coordinator.config_entry = SimpleNamespace(data={
+        coordinator.config_entry = SimpleNamespace(entry_id="test", data={
             HUB_SECTION_ADVANCED: {
                 CONF_FORECAST_CONFIDENCE_ENABLED: enabled,
                 CONF_PLAN_GATE_ENABLED: enabled,
@@ -54,6 +54,7 @@ def test_initialize_then_optimize(enabled: bool) -> None:
             patch(f"{module}.serialize_topology", return_value={}),
             patch(f"{module}.evaluate_network_connectivity"),
             patch(f"{module}.build_optimization_context", return_value=Mock()),
+            patch(f"{module}.input_forecasts", return_value={}),
         ):
             await coordinator.async_initialize()
             plan = await coordinator._async_update_data()
@@ -88,3 +89,4 @@ def test_ungated_ticks_do_not_grow_archive(tmp_path) -> None:
         assert history.store.async_save.await_count == 2
 
     asyncio.run(run())
+

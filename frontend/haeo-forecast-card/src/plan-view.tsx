@@ -1,6 +1,7 @@
 import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { observer } from "./mobx-observer";
+import type { PowerMeasurement } from "./actual-sources";
 import type { ForecastCardStore } from "./store";
 
 const HOUR = 3_600_000;
@@ -16,6 +17,7 @@ export interface PlanSummary {
 
 export interface PlanDetail extends PlanSummary {
   boundaries: number[];
+  inputs?: Record<string, Record<string, [number, number][]>>;
   series: Record<string, Record<string, [number, number][]>>;
 }
 
@@ -36,6 +38,7 @@ export interface RecorderState {
 
 interface ArchivePage {
   plans: PlanSummary[];
+  measurements?: Record<string, PowerMeasurement>;
   decision?: { status?: string; last_run?: string; benefit?: number | null };
   archive: { plans: number; bytes: number };
 }
@@ -105,6 +108,7 @@ export const PlanControls = observer(function PlanControls({
           if (cancelled) return;
           setArchive(page.archive);
           setDecision(page.decision);
+          store.setPowerMeasurements(page.measurements ?? {});
           plans.push(...page.plans);
           before =
             page.plans.length === PAGE && Date.parse(page.plans.at(-1)!.accepted_at) > cutoff
@@ -226,10 +230,6 @@ export const PlanControls = observer(function PlanControls({
           {Object.keys(measurements).length ? "solid measurement traces" : "no matching measurement inputs"}
         </div>
       )}
-      {past > 0 &&
-        Object.values(measurements).some(
-          (id) => store.hass?.states[id]?.attributes["output_name"] === "battery_power_active"
-        ) && <span>Battery power trace uses the recorded optimizer output.</span>}
       <div className="optimizerSummary">
         Optimiser {decision?.status ?? "pending"} · Benefit {decision?.benefit?.toFixed(3) ?? "—"} · Last run{" "}
         {decision?.last_run ? new Date(decision.last_run).toLocaleString() : "—"}

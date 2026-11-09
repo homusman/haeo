@@ -12,8 +12,11 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from custom_components.haeo_homusman.const import DOMAIN
+from custom_components.haeo_homusman.core.const import CONF_MEASURED_POWER, CONF_MEASURED_POWER_INVERTED
 
 if TYPE_CHECKING:
     from .coordinator import CoordinatorData
@@ -22,6 +25,33 @@ _LOGGER = logging.getLogger(__name__)
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PLAN_BYTES = 512 * 1024
 PAGE_SIZE = 32
+
+
+def input_forecasts(hass: HomeAssistant, entry_id: str) -> dict:
+    """Capture the plotted input forecasts as they existed at the start of a solve."""
+    result = {}
+    entries = er.async_entries_for_config_entry(er.async_get(hass), entry_id)
+    for entry in entries:
+        if (state := hass.states.get(entry.entity_id)) is None:
+            continue
+        attrs = state.attributes
+        if not attrs.get("config_mode") or not isinstance(forecast := attrs.get("forecast"), list | tuple):
+            continue
+        element, field = attrs.get("element_name"), attrs.get("field_path")
+        if not isinstance(element, str) or not isinstance(field, str):
+            continue
+        points = []
+        for point in forecast[:2000]:
+            if not isinstance(point, dict):
+                continue
+            at, value = point.get("time"), point.get("value")
+            if isinstance(at, str):
+                at = dt_util.parse_datetime(at)
+            if isinstance(at, datetime) and isinstance(value, int | float):
+                points.append([at.timestamp(), value])
+        if len(points) > 1:
+            result.setdefault(element, {})[field] = points
+    return result
 
 
 def plan_record(plan: "CoordinatorData", decision: dict[str, str | float | None]) -> dict:
@@ -44,6 +74,7 @@ def plan_record(plan: "CoordinatorData", decision: dict[str, str | float | None]
         "boundaries": plan.boundaries,
         "decision": decision,
         "series": series,
+        "inputs": getattr(plan, "input_forecasts", None) or {},
     }
 
 
@@ -170,6 +201,15 @@ async def websocket_plans(hass: HomeAssistant, connection: websocket_api.ActiveC
     if response is None:
         connection.send_error(msg["id"], "not_found", "Plan unavailable")
     else:
+        if not msg.get("plan_id"):
+            response["measurements"] = {
+                subentry.title: {
+                    "entity_id": entity_id,
+                    "inverted": bool(subentry.data.get(CONF_MEASURED_POWER_INVERTED)),
+                }
+                for subentry in entry.subentries.values()
+                if isinstance(entity_id := subentry.data.get(CONF_MEASURED_POWER), str)
+            }
         connection.send_result(msg["id"], response)
 
 

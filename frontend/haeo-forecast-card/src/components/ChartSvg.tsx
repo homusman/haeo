@@ -4,11 +4,13 @@ import { HistoryLayer } from "./HistoryLayer";
 import { AxesGrid } from "./AxesGrid";
 import { OverlayLineLayer } from "./OverlayLineLayer";
 import { PowerStackLayer } from "./PowerStackLayer";
+import { windowBands } from "../window-bands";
 import { observer } from "../mobx-observer";
 import type { ForecastCardStore } from "../store";
 
 interface ChartSvgProps {
   store: ForecastCardStore;
+  comparison?: boolean;
   onPointerMove: (event: PointerEvent) => void;
   onPointerLeave: () => void;
 }
@@ -41,12 +43,22 @@ const AxesLayer = observer(function AxesLayer(props: { store: ForecastCardStore 
 const WINDOW_STRIP_HEIGHT = 4;
 const WINDOW_STRIP_GAP = 1;
 
-const WindowLayer = observer(function WindowLayer(props: { store: ForecastCardStore }): JSX.Element {
+const WindowLayer = observer(function WindowLayer(props: {
+  store: ForecastCardStore;
+  comparison: boolean;
+}): JSX.Element {
   const { store } = props;
   const height = store.plotBottom - store.plotTop;
   return (
     <g className="windowLayer">
-      {store.windowBands.map((band) => {
+      {(props.comparison
+        ? windowBands(
+            store.pinnedComparisonSeries.filter(({ lane }) => lane === "window"),
+            (time) => store.xScale(time),
+            store.xDomain.max
+          )
+        : store.windowBands
+      ).map((band) => {
         const active = store.highlightedSeries === band.seriesKey || store.focusedLegendSeriesKeys.has(band.seriesKey);
         return (
           <g key={band.key} className={`windowBand ${active ? "active" : ""}`} style={{ color: band.color }}>
@@ -65,11 +77,14 @@ const WindowLayer = observer(function WindowLayer(props: { store: ForecastCardSt
   );
 });
 
-const PowerLayer = observer(function PowerLayer(props: { store: ForecastCardStore }): JSX.Element {
+const PowerLayer = observer(function PowerLayer(props: {
+  store: ForecastCardStore;
+  paths: ForecastCardStore["plotPaths"];
+}): JSX.Element {
   const { store } = props;
   return (
     <PowerStackLayer
-      shapes={store.powerShapes}
+      shapes={props.paths.powerShapes}
       highlightedSeries={store.highlightedSeries}
       hoveredSeriesKeys={store.hoveredPowerSeriesKeys}
       focusedSeriesKeys={store.focusedLegendSeriesKeys}
@@ -77,19 +92,22 @@ const PowerLayer = observer(function PowerLayer(props: { store: ForecastCardStor
   );
 });
 
-const OverlayLayers = observer(function OverlayLayers(props: { store: ForecastCardStore }): JSX.Element {
+const OverlayLayers = observer(function OverlayLayers(props: {
+  store: ForecastCardStore;
+  paths: ForecastCardStore["plotPaths"];
+}): JSX.Element {
   const { store } = props;
   return (
     <>
       <OverlayLineLayer
-        paths={store.pricePaths}
+        paths={props.paths.pricePaths}
         highlightedSeries={store.highlightedSeries}
         focusedSeriesKeys={store.focusedLegendSeriesKeys}
         cssClass="priceLine"
       />
 
       <OverlayLineLayer
-        paths={store.socPaths}
+        paths={props.paths.socPaths}
         highlightedSeries={store.highlightedSeries}
         focusedSeriesKeys={store.focusedLegendSeriesKeys}
         cssClass="socLine"
@@ -108,8 +126,13 @@ const HoverOverlay = observer(function HoverOverlay(props: { store: ForecastCard
   return <line className="hoverLine" x1={x} y1={store.plotTop} x2={x} y2={store.plotBottom} />;
 });
 
-const PlotViewport = observer(function PlotViewport(props: { store: ForecastCardStore }): JSX.Element {
+const PlotViewport = observer(function PlotViewport(props: {
+  store: ForecastCardStore;
+  comparison: boolean;
+}): JSX.Element {
   const { store } = props;
+  const paths = props.comparison ? store.pathsForSeries(store.pinnedComparisonSeries) : store.plotPaths;
+  const clipId = `future-${store.instanceId}${props.comparison ? "-comparison" : ""}`;
   const plotWidth = store.width - store.margins.left - store.margins.right;
   const plotHeight = store.plotBottom - store.plotTop;
   return (
@@ -123,21 +146,21 @@ const PlotViewport = observer(function PlotViewport(props: { store: ForecastCard
     >
       <g transform={`translate(${-store.margins.left} ${-store.plotTop})`}>
         <defs>
-          <clipPath id={`future-${store.instanceId}`}>
+          <clipPath id={clipId}>
             <rect
-              x={store.historyReady ? store.xScale(store.historyClock) : store.margins.left}
+              x={!props.comparison && store.historyReady ? store.xScale(store.historyClock) : store.margins.left}
               y={store.plotTop}
               width={plotWidth}
               height={plotHeight}
             />
           </clipPath>
         </defs>
-        <g clip-path={`url(#future-${store.instanceId})`}>
-          <WindowLayer store={store} />
-          <PowerLayer store={store} />
-          <OverlayLayers store={store} />
+        <g clip-path={`url(#${clipId})`}>
+          <WindowLayer store={store} comparison={props.comparison} />
+          <PowerLayer store={store} paths={paths} />
+          <OverlayLayers store={store} paths={paths} />
         </g>
-        <HistoryLayer store={store} />
+        {!props.comparison && <HistoryLayer store={store} />}
         <HoverOverlay store={store} />
       </g>
     </svg>
@@ -161,7 +184,7 @@ export const ChartSvg = observer(function ChartSvg(props: ChartSvgProps): JSX.El
       }}
     >
       <AxesLayer store={store} />
-      <PlotViewport store={store} />
+      <PlotViewport store={store} comparison={props.comparison ?? false} />
     </svg>
   );
 });

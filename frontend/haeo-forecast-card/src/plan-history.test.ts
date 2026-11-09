@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clipPlanPoints } from "./archived-series";
+import { archivedSeries, clipPlanPoints } from "./archived-series";
 import { historicSegments, type PlanSummary } from "./plan-view";
 
 const plan = (seconds: number, reason = "accepted", ended?: number): PlanSummary => ({
@@ -83,4 +83,38 @@ it("carries the previous saved cost when a same-input benefit is unavailable", (
   const segments = historicSegments([next, first], 30_000);
   expect(segments[1]?.previousCost).toBe(2.5);
   expect(segments[1]?.plan.decision.benefit).toBeNull();
+});
+
+it("loads the pinned tariff from its archived input instead of a live tariff", () => {
+  const summary = plan(10);
+  const source = {
+    entityId: "number.tariff",
+    outputName: "price",
+    drawType: "step",
+  } as import("./types").ForecastSeries;
+  const hass = {
+    states: {
+      "number.tariff": {
+        entity_id: "number.tariff",
+        attributes: { element_name: "Grid", field_path: "pricing.import" },
+      },
+    },
+  };
+  const detail = {
+    ...summary,
+    boundaries: [10, 20],
+    series: {},
+    inputs: {
+      Grid: {
+        "pricing.import": [
+          [10, 0.3],
+          [20, 0.4],
+        ] as [number, number][],
+      },
+    },
+  };
+  const [archived] = archivedSeries([source], hass, detail);
+  expect(Array.from(archived!.times)).toEqual([10000, 20000]);
+  expect(Array.from(archived!.values)).toEqual([0.3, 0.4]);
+  expect(archivedSeries([source], hass, { ...summary, boundaries: [10, 20], series: {} })).toEqual([]);
 });

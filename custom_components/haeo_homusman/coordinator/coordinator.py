@@ -83,7 +83,7 @@ from custom_components.haeo_homusman.services import async_save_diagnostics
 from custom_components.haeo_homusman.util import network_subentry
 
 from .plan_acceptance import THRESHOLD, adjust_grid_prices, assess_plan, tariff_weights
-from .plan_history import PlanHistory
+from .plan_history import PlanHistory, input_forecasts
 from .network import evaluate_network_connectivity
 
 if TYPE_CHECKING:
@@ -339,6 +339,7 @@ class CoordinatorData:
     completed_at: datetime
     boundaries: tuple[float, ...] = ()
     actions: Mapping[str, tuple[float, ...]] | None = None
+    input_forecasts: dict | None = None
     """When the optimization completed."""
 
 
@@ -812,6 +813,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             network = self._build_network(loaded_configs)
         self._stale_elements.clear()
 
+        captured_inputs = input_forecasts(self.hass, self.config_entry.entry_id)
         cost = await self._solve(network, context, started_at, forecast_timestamps)
 
         end_time = time.time()
@@ -827,6 +829,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             started_at=started_at,
             completed_at=dt_util.utc_from_timestamp(end_time).astimezone(),
         )
+        candidate.input_forecasts = captured_inputs
         candidate.boundaries = tuple(forecast_timestamps)
         candidate.actions = network.action_snapshot()
         previous = self._accepted

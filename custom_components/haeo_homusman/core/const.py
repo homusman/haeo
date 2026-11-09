@@ -3,6 +3,8 @@
 import enum
 from typing import Final
 
+CONF_MEASURED_POWER: Final = "measured_power"
+CONF_MEASURED_POWER_INVERTED: Final = "measured_power_inverted"
 CONF_ELEMENT_TYPE: Final = "element_type"
 CONF_NAME: Final = "name"
 

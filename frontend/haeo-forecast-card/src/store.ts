@@ -1,6 +1,6 @@
 import { actualPoints, measuredAt } from "./actual-points";
 import { archivedSeries } from "./archived-series";
-import { discoverActualSources } from "./actual-sources";
+import { discoverActualSources, type PowerMeasurement } from "./actual-sources";
 import { computed, makeAutoObservable, observable } from "mobx";
 
 import { clamp, linearScale } from "./geometry";
@@ -81,6 +81,7 @@ export class ForecastCardStore {
   candidatePreview: PlanDetail | null = null;
   segments: PlanSegment[] = [];
   historyDetails: Record<string, PlanDetail> = {};
+  powerMeasurements: Record<string, PowerMeasurement> = {};
   actuals: Record<string, RecorderState[]> = {};
   normalizedSeriesCache: ForecastSeries[] = [];
   powerBoundsCache: LaneBounds = { min: -1, max: 1 };
@@ -118,6 +119,7 @@ export class ForecastCardStore {
       candidatePreview: observable.ref,
       historyDetails: observable.ref,
       actuals: observable.ref,
+      powerMeasurements: observable.ref,
       normalizedSeriesCache: observable.ref,
       instanceId: false,
       plotPathsSnapshot: false,
@@ -168,7 +170,16 @@ export class ForecastCardStore {
   }
 
   get actualSources(): Record<string, string> {
-    return discoverActualSources(this.hass, this.config, this.normalizedSeriesCache);
+    return discoverActualSources(this.hass, this.config, this.normalizedSeriesCache, this.powerMeasurements);
+  }
+
+  setPowerMeasurements(measurements: Record<string, PowerMeasurement>): void {
+    this.powerMeasurements = measurements;
+  }
+
+  get pinnedComparisonSeries(): ForecastSeries[] {
+    const detail = this.pinnedPlanId && this.historyDetails[this.pinnedPlanId];
+    return detail ? archivedSeries(this.visibleSeries, this.hass, detail) : [];
   }
 
   setActuals(actuals: Record<string, RecorderState[]>): void {
@@ -180,6 +191,7 @@ export class ForecastCardStore {
       this.setSegments([]);
       this.setCandidatePreview(null);
       this.setActuals({});
+      this.setPowerMeasurements({});
     }
     this.config = config;
     this.applyConfigDefaults();
@@ -784,8 +796,7 @@ export class ForecastCardStore {
       computeHoverIndices(this.normalizedSeries, this.panelTimeMs),
       (series, value) => this.powerValueForDisplayBound(series, value)
     );
-    const selected = this.hoveredPlan;
-    const detail = selected && this.historyDetails[selected.plan.id];
+    const detail = this.pinnedPlanId && this.historyDetails[this.pinnedPlanId];
     if (!detail && !this.pastHours) return rows;
     const current = this.visibleSeries;
     const historic = detail ? archivedSeries(this.visibleSeries, this.hass, detail) : [];

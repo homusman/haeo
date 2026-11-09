@@ -12,10 +12,11 @@ from typing import (
     ClassVar,
 )
 
+from homeassistant.helpers import selector
 from homeassistant.config_entries import SubentryFlowResult
 import voluptuous as vol
 
-from custom_components.haeo_homusman.core.const import CONF_ELEMENT_TYPE, CONF_NAME
+from custom_components.haeo_homusman.core.const import CONF_ELEMENT_TYPE, CONF_MEASURED_POWER, CONF_MEASURED_POWER_INVERTED, CONF_NAME
 from custom_components.haeo_homusman.core.data.loader.extractors import EntityMetadata
 from custom_components.haeo_homusman.core.schema.field_hints import SurfacedPriceHint
 from custom_components.haeo_homusman.core.schema.surfaced_policy import get_surfaced_price_hints
@@ -174,7 +175,13 @@ class SectionedElementSubentryFlow(ElementSubentryFlow):
             get_input_field_schema_info(self.element_type, input_fields),
             build_sectioned_inclusion_map(input_fields, entity_metadata),
             current_data=sectioned_view(subentry_data),
-            top_level_entries=self._top_level_entries(subentry_data),
+            top_level_entries={
+                **self._top_level_entries(subentry_data),
+                CONF_MEASURED_POWER: (vol.Optional(CONF_MEASURED_POWER), selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor")
+                )),
+                CONF_MEASURED_POWER_INVERTED: (vol.Optional(CONF_MEASURED_POWER_INVERTED), bool),
+            },
             extra_field_entries=self._section_entries(subentry_data, entity_metadata),
         )
 
@@ -188,6 +195,11 @@ class SectionedElementSubentryFlow(ElementSubentryFlow):
         return {
             CONF_NAME: default_name if subentry_data is None else subentry_data.get(CONF_NAME),
             **self._top_level_defaults(subentry_data),
+            **{
+                key: subentry_data[key]
+                for key in (CONF_MEASURED_POWER, CONF_MEASURED_POWER_INVERTED)
+                if subentry_data and key in subentry_data
+            },
             **build_sectioned_choose_defaults(
                 self.sections,
                 input_fields,
@@ -231,6 +243,11 @@ class SectionedElementSubentryFlow(ElementSubentryFlow):
             CONF_NAME: user_input[CONF_NAME],
             **sections,
             **self._config_fields(user_input, sections),
+            **{
+                key: user_input[key]
+                for key in (CONF_MEASURED_POWER, CONF_MEASURED_POWER_INVERTED)
+                if user_input.get(CONF_MEASURED_POWER) and key in user_input
+            },
         }
 
     def _write_linked_entries(self) -> None:

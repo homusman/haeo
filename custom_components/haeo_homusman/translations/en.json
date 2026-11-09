@@ -123,7 +123,7 @@
         "user": {
           "title": "Battery configuration",
           "description": "Configure battery parameters for energy optimization",
-          "data": { "connection": "Connection", "name": "Battery name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Battery name" },
           "sections": {
             "advanced": {
               "data": { "charge_limit_cost": "Limit cost" },
@@ -181,7 +181,7 @@
         "user": {
           "title": "Battery section configuration",
           "description": "Configure a single battery section with explicit capacity and initial charge. Battery sections have no implicit connections. Connections carry power in one direction only, so add one connection into the section to charge it and another connection out of it to discharge it.",
-          "data": { "name": "Battery section name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "name": "Battery section name" },
           "sections": {
             "storage": { "data": { "capacity": "Capacity", "initial_charge": "Initial charge" }, "name": "Storage" }
           }
@@ -202,7 +202,7 @@
         "user": {
           "title": "Buffer configuration",
           "description": "Keep energy in your batteries for an outage (a reserve), or empty space for incoming generation (headroom).",
-          "data": { "kind": "Kind", "name": "Buffer name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "kind": "Kind", "name": "Buffer name" },
           "data_description": {
             "kind": "A reserve keeps the batteries charged enough. Headroom keeps them empty enough."
           },
@@ -250,7 +250,7 @@
         "user": {
           "title": "Connection configuration",
           "description": "Configure a unidirectional power path from source to target. For reverse flow, add a second connection with swapped endpoints.",
-          "data": { "name": "Connection name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "name": "Connection name" },
           "sections": {
             "efficiency": { "data": { "efficiency_source_target": "Efficiency" }, "name": "Connection efficiency" },
             "endpoints": { "data": { "source": "Source device", "target": "Target device" }, "name": "Endpoints" },
@@ -276,7 +276,7 @@
         "user": {
           "title": "Deferrable load configuration",
           "description": "Configure a load that must receive scheduled amounts of energy within calendar windows",
-          "data": { "connection": "Connection", "name": "Deferrable load name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Deferrable load name" },
           "sections": {
             "power": { "data": { "max_power": "Max power" }, "name": "Power" },
             "pricing": {
@@ -306,7 +306,7 @@
         "user": {
           "title": "EV configuration",
           "description": "Configure your electric vehicle with battery details, charging rates, and trip planning",
-          "data": { "connection": "Connection", "name": "EV name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "EV name" },
           "sections": {
             "advanced": {
               "data": { "charge_limit_cost": "Limit cost" },
@@ -369,7 +369,7 @@
         "user": {
           "title": "Grid configuration",
           "description": "Configure grid import/export parameters and pricing",
-          "data": { "connection": "Connection", "name": "Grid name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Grid name" },
           "sections": {
             "power_limits": {
               "data": { "max_power_source_target": "Import limit", "max_power_target_source": "Export limit" },
@@ -398,7 +398,7 @@
         "user": {
           "title": "Inverter configuration",
           "description": "Configure bidirectional inverter with DC bus for battery and solar connections",
-          "data": { "connection": "AC connection", "name": "Inverter name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "AC connection", "name": "Inverter name" },
           "sections": {
             "efficiency": {
               "data": {
@@ -433,7 +433,7 @@
         "user": {
           "title": "Junction configuration",
           "description": "Add a junction where connections meet. Power flowing in always equals power flowing out.",
-          "data": { "name": "Junction name" }
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "name": "Junction name" }
         }
       },
       "error": { "missing_name": "Name is required", "name_exists": "A device with this name already exists" },
@@ -447,7 +447,7 @@
         "user": {
           "title": "Load configuration",
           "description": "Configure a load with forecast or constant power.\n\n[HAFO]({hafo_url}) can be used to generate forecast sensors.",
-          "data": { "connection": "Connection", "name": "Load name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Load name" },
           "sections": {
             "curtailment": {
               "data": { "consumption_cost": "Consumption cost", "curtailment": "Allow shedding" },
@@ -485,7 +485,7 @@
         "user": {
           "title": "Node configuration",
           "description": "Add a node that can produce or consume unlimited power. Use a junction for a point that only passes power through.",
-          "data": { "name": "Node name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "name": "Node name" },
           "sections": {
             "role": {
               "data": {
@@ -508,7 +508,7 @@
         "user": {
           "title": "Add policy",
           "description": "Create a policy rule to control how power flows between elements",
-          "data": {
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign",
             "enabled": "Enabled",
             "name": "Policy name",
             "price": "Price",
@@ -550,7 +550,7 @@
         "user": {
           "title": "Solar configuration",
           "description": "Configure solar forecasting and parameters",
-          "data": { "connection": "Connection", "name": "Solar name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Solar name" },
           "sections": {
             "curtailment": { "data": { "curtailment": "Allow curtailment" }, "name": "Curtailment" },
             "forecast": { "data": { "forecast": "Forecast" }, "name": "Forecast" }
