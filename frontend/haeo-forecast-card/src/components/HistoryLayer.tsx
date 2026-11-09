@@ -1,3 +1,4 @@
+import { actualPoints } from "../actual-points";
 import type { JSX } from "preact";
 import { linePath, stepPath } from "../geometry";
 import { observer } from "../mobx-observer";
@@ -35,27 +36,6 @@ function path(store: ForecastCardStore, series: ForecastSeries, points: Point[],
       )
     )
     .join(" ");
-}
-
-function actualPoints(store: ForecastCardStore, series: ForecastSeries): Point[] {
-  const id = store.actualSources[series.entityId];
-  if (!id) return [];
-  const unit = store.hass?.states[id]?.attributes["unit_of_measurement"];
-  const scales: Record<string, number> = { W: 1, kW: 1000, MW: 1_000_000 };
-  const sourceScale = typeof unit === "string" ? scales[unit] : undefined;
-  const targetScale = scales[series.unit];
-  const scale = unit === series.unit ? 1 : sourceScale && targetScale ? sourceScale / targetScale : null;
-  if (scale === null) return [];
-  const data = store.actuals[id] ?? [];
-  const signedBattery = store.hass?.states[id]?.attributes["output_name"] === "battery_power_active";
-  const points: Point[] = data.map(({ lu, lc, s }) => {
-    const value = s.trim() ? Number(s) * scale : NaN;
-    return [
-      (lu ?? lc ?? NaN) * 1000,
-      signedBattery ? Math.max(0, series.outputName === "battery_power_charge" ? -value : value) : value,
-    ];
-  });
-  return points.filter(([time]) => Number.isFinite(time) && time <= store.historyClock).slice(-8000);
 }
 
 export const HistoryLayer = observer(function HistoryLayer({
@@ -110,19 +90,18 @@ export const HistoryLayer = observer(function HistoryLayer({
           );
         });
       })}
-      {store.segments.length > 0 &&
-        visible.map((series) => {
-          const points = actualPoints(store, series);
-          return (
-            <path
-              key={series.key}
-              d={path(store, series, points, true)}
-              fill="none"
-              stroke={series.color}
-              stroke-width={2}
-            />
-          );
-        })}
+      {visible.map((series) => {
+        const points = actualPoints(store, series);
+        return (
+          <path
+            key={series.key}
+            d={path(store, series, points, true)}
+            fill="none"
+            stroke={series.color}
+            stroke-width={2}
+          />
+        );
+      })}
       {selected &&
         !store.candidatePreview &&
         visible

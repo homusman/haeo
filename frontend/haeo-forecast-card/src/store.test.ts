@@ -503,7 +503,8 @@ it("replaces current forecast series with candidate data and restores current on
   const store = new ForecastCardStore();
   store.setConfig(testConfig);
   store.setHass(loadScenarioHassState("scenario2"));
-  const current = store.powerSeries[0]!;
+  const current = store.powerSeries.find((item) => item.sourceRole === "output")!;
+  const priceInputs = store.plottedSeries.filter((item) => item.lane === "price" && item.sourceRole !== "output");
   const name = String(store.hass?.states[current.entityId]?.attributes["element_name"]);
   const start = current.times[0]! / 1000;
   const end = current.times[1]! / 1000;
@@ -523,11 +524,12 @@ it("replaces current forecast series with candidate data and restores current on
       },
     },
   });
-  expect(store.powerSeries).toHaveLength(1);
-  expect(store.powerSeries[0]?.values[0]).toBe(25);
+  expect(store.powerSeries.filter((item) => item.sourceRole === "output")).toHaveLength(1);
+  expect(store.powerSeries.find((item) => item.key === current.key)?.values[0]).toBe(25);
   expect(store.powerShapes[0]?.d).toBeTruthy();
+  expect(store.priceSeries.filter((item) => item.sourceRole !== "output")).toEqual(priceInputs);
   store.setCandidatePreview(null);
-  expect(store.powerSeries[0]).toBe(current);
+  expect(store.powerSeries.find((item) => item.key === current.key)).toBe(current);
 });
 
 it("pins comparison across pointer changes and keeps axis ranges fixed", () => {
@@ -564,4 +566,16 @@ it("pins comparison across pointer changes and keeps axis ranges fixed", () => {
   expect(store.socBounds).toEqual({ min: 0, max: 100 });
   store.toggleComparisonPin();
   expect(store.hoveredPlan).toBeNull();
+});
+
+it("keeps cursor time available before the earliest archived plan", () => {
+  const store = new ForecastCardStore();
+  store.setConfig(testConfig);
+  store.setHass(loadScenarioHassState("scenario2"));
+  const now = store.fullXDomain.min;
+  store.setHistoryClock(now);
+  store.setPastHours(2);
+  store.setPointer(store.margins.left + 1, store.plotTop + 5);
+  expect(store.hoveredPlan).toBeNull();
+  expect(store.hoverTimeMs).toBeLessThan(now);
 });

@@ -744,7 +744,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._failure_issue_raised = False
             dismiss_optimization_failure_issue(self.hass, self.config_entry.entry_id)
             return
-        self.plan_decision = {"reason": "unavailable"}
+        self.plan_decision = {"reason": "unavailable", "status": "failed", "last_run": datetime.now(UTC).isoformat()}
         now = time.time()
         reported = isinstance(self.last_exception, ReportedUpdateFailed)
         if self._failing_since is None:
@@ -847,6 +847,8 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             )
         self.plan_decision = {
             "reason": reason,
+            "status": "success",
+            "last_run": datetime.now(UTC).isoformat(),
             "candidate_cost": cost,
             "incumbent_cost": benchmark,
             "benefit": None if benchmark is None else benchmark - cost,

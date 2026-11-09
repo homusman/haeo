@@ -565,3 +565,13 @@ ha-card {
 .historicValue {
   opacity: 0.72;
 }
+
+.comparisonLegend .measuredSwatch {
+  height: 2px;
+  vertical-align: middle;
+}
+
+.optimizerSummary {
+  flex-basis: 100%;
+  font-size: 0.8rem;
+}

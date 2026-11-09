@@ -201,27 +201,25 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
       <CardTitle store={props.store} />
       <div className="axisControls">
         <label>
-          Power ±{props.store.powerRange ?? 15} kW
+          Power range ± kW
           <input
             aria-label="Power range"
-            type="range"
+            type="number"
             min={1}
-            max={100}
-            step={1}
+            step="any"
             value={props.store.powerRange ?? 15}
-            onInput={(event) => props.store.setAxisRange("power", Number(event.currentTarget.value))}
+            onChange={(event) => props.store.setAxisRange("power", Number(event.currentTarget.value))}
           />
         </label>
         <label>
-          Price ±{props.store.priceRange ?? 2}/kWh
+          Price range ± per kWh
           <input
             aria-label="Price range"
-            type="range"
+            type="number"
             min={0.05}
-            max={20}
-            step={0.05}
+            step="any"
             value={props.store.priceRange ?? 2}
-            onInput={(event) => props.store.setAxisRange("price", Number(event.currentTarget.value))}
+            onChange={(event) => props.store.setAxisRange("price", Number(event.currentTarget.value))}
           />
         </label>
       </div>

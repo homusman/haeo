@@ -1,6 +1,6 @@
 [project]
 name = "haeo"
-version = "0.5.4b6"
+version = "0.5.4b7"
 description = "Home Assistant Energy Network Optimizer"
 readme = "README.md"
 requires-python = ">=3.13.2,<3.14"

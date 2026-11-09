@@ -991,7 +991,7 @@ wheels = [
 
 [[package]]
 name = "haeo"
-version = "0.5.4b6"
+version = "0.5.4b7"
 source = { editable = "." }
 dependencies = [
     { name = "highspy" },

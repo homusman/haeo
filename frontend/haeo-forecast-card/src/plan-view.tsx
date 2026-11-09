@@ -36,6 +36,7 @@ export interface RecorderState {
 
 interface ArchivePage {
   plans: PlanSummary[];
+  decision?: { status?: string; last_run?: string; benefit?: number | null };
   archive: { plans: number; bytes: number };
 }
 
@@ -71,6 +72,7 @@ export const PlanControls = observer(function PlanControls({
 }: {
   store: ForecastCardStore;
 }): JSX.Element | null {
+  const [decision, setDecision] = useState<ArchivePage["decision"]>();
   const [archive, setArchive] = useState<ArchivePage["archive"] | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -102,6 +104,7 @@ export const PlanControls = observer(function PlanControls({
           const page = await hass.callWS<ArchivePage>({ ...message, ...(before ? { before } : {}) });
           if (cancelled) return;
           setArchive(page.archive);
+          setDecision(page.decision);
           plans.push(...page.plans);
           before =
             page.plans.length === PAGE && Date.parse(page.plans.at(-1)!.accepted_at) > cutoff
@@ -227,6 +230,10 @@ export const PlanControls = observer(function PlanControls({
         Object.values(measurements).some(
           (id) => store.hass?.states[id]?.attributes["output_name"] === "battery_power_active"
         ) && <span>Battery power trace uses the recorded optimizer output.</span>}
+      <div className="optimizerSummary">
+        Optimiser {decision?.status ?? "pending"} · Benefit {decision?.benefit?.toFixed(3) ?? "—"} · Last run{" "}
+        {decision?.last_run ? new Date(decision.last_run).toLocaleString() : "—"}
+      </div>
       {error && <div role="status">{error}</div>}
     </div>
   );

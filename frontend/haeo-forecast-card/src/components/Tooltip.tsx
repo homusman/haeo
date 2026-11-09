@@ -12,7 +12,7 @@ interface TooltipRow {
   label: string;
   value: number;
   possibleValue?: number;
-  comparison?: { current: number | undefined; historical: number | undefined };
+  comparison?: { current: number | undefined; historical: number | undefined; measured: number | undefined };
   unit: string;
   color: string;
   lane: TooltipSectionId;
@@ -65,6 +65,9 @@ export function Tooltip(props: TooltipProps): JSX.Element | null {
           <span>
             <i className="historicSwatch" /> Compared
           </span>
+          <span>
+            <i className="measuredSwatch" /> Measured
+          </span>
         </div>
       )}
       <div className="tooltipTime">{formatDateTime(props.panelTimeMs, props.format)}</div>
@@ -95,6 +98,11 @@ export function Tooltip(props: TooltipProps): JSX.Element | null {
                       {row.comparison.historical === undefined
                         ? "—"
                         : formatNumber(row.comparison.historical, props.format, 2)}
+                    </span>
+                    <span className="comparisonValue">
+                      {row.comparison.measured === undefined
+                        ? "—"
+                        : formatNumber(row.comparison.measured, props.format, 2)}
                     </span>
                     {row.unit}
                   </>

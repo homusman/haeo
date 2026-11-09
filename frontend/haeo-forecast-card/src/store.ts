@@ -1,3 +1,4 @@
+import { actualPoints, measuredAt } from "./actual-points";
 import { archivedSeries } from "./archived-series";
 import { discoverActualSources } from "./actual-sources";
 import { computed, makeAutoObservable, observable } from "mobx";
@@ -348,7 +349,14 @@ export class ForecastCardStore {
 
   get plottedSeries(): ForecastSeries[] {
     const candidate = this.candidatePreview;
-    return candidate ? archivedSeries(this.visibleSeries, this.hass, candidate) : this.visibleSeries;
+    if (!candidate) return this.visibleSeries;
+    const candidateSeries = new Map(
+      archivedSeries(this.visibleSeries, this.hass, candidate).map((item) => [item.key, item])
+    );
+    return this.visibleSeries.flatMap((item) => {
+      const replacement = candidateSeries.get(item.key);
+      return replacement ? [replacement] : item.sourceRole !== "output" ? [item] : [];
+    });
   }
 
   get powerSeries(): ForecastSeries[] {
@@ -486,6 +494,7 @@ export class ForecastCardStore {
   }
 
   setAxisRange(axis: "power" | "price", value: number): void {
+    if (!Number.isFinite(value) || value <= 0) return;
     if (axis === "power") this.powerRange = value;
     else this.priceRange = value;
   }
@@ -630,7 +639,7 @@ export class ForecastCardStore {
     const innerWidth = this.width - this.margins.left - this.margins.right;
     const ratio = innerWidth > 0 ? (x - this.margins.left) / innerWidth : 0;
     const time = min + ratio * (max - min);
-    return this.historyReady && time < this.historyClock && !this.hoveredPlan ? null : time;
+    return time;
   }
 
   get panelTimeMs(): number {
@@ -762,7 +771,7 @@ export class ForecastCardStore {
     possibleKey?: string;
     label: string;
     value: number;
-    comparison?: { current: number | undefined; historical: number | undefined };
+    comparison?: { current: number | undefined; historical: number | undefined; measured: number | undefined };
     possibleValue?: number;
     unit: string;
     color: string;
@@ -777,9 +786,9 @@ export class ForecastCardStore {
     );
     const selected = this.hoveredPlan;
     const detail = selected && this.historyDetails[selected.plan.id];
-    if (!detail) return rows;
+    if (!detail && !this.pastHours) return rows;
     const current = this.visibleSeries;
-    const historic = archivedSeries(this.visibleSeries, this.hass, detail);
+    const historic = detail ? archivedSeries(this.visibleSeries, this.hass, detail) : [];
     const time = this.panelTimeMs;
     const sample = (series: ForecastSeries | undefined): number | undefined => {
       if (!series || time < series.times[0]! || time > series.times.at(-1)!) return undefined;
@@ -792,6 +801,12 @@ export class ForecastCardStore {
       comparison: {
         current: sample(current.find((item) => item.key === row.key)),
         historical: sample(historic.find((item) => item.key === row.key)),
+        measured: (() => {
+          const series = this.visibleSeries.find((item) => item.key === row.key);
+          if (!series) return undefined;
+          const value = measuredAt(actualPoints(this, series), time);
+          return value === undefined ? undefined : this.powerValueForDisplayBound(series, value);
+        })(),
       },
     }));
   }
