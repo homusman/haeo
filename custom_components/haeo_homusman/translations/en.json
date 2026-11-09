@@ -85,6 +85,14 @@
               "relax_infeasible": "Relax impossible plans"
             },
             "data_description": {
+              "forecast_confidence_enabled": "Reduce deviations from the filtered tariff baseline farther into the forecast. The first interval keeps the original tariff.",
+              "spike_suppression_enabled": "Apply additional attenuation to larger tariff deviations. It increases farther into the forecast and leaves the first interval unchanged.",
+              "confidence_midpoint_hours": "Lead time at the centre of the transition toward the minimum time weight.",
+              "confidence_width_hours": "How gradual the transition is. Larger values spread the change over more hours.",
+              "confidence_floor": "Minimum retained fraction of a distant tariff deviation before any additional spike suppression.",
+              "tariff_baseline_hours": "Time constant of the filtered tariff baseline. Larger values smooth over a longer window.",
+              "spike_scale_cents_per_kwh": "Deviation from the baseline at which the spike response reaches about 63% of its maximum. Smaller values also suppress modest deviations.",
+              "max_spike_suppression": "Maximum extra fraction of a large distant deviation to remove. A value of 0 disables the extra reduction.",
               "advanced_mode": "Shows low-level model elements you connect manually. Leave off unless you are deliberately building the optimization model yourself.",
               "record_forecasts": "When enabled, forecast attributes are saved to the recorder database. This significantly increases database size but allows debugging historical forecasts. Disabled by default to reduce database load.",
               "relax_infeasible": "When the forecasts ask for more than your system can do, such as a load above what the grid and batteries can supply, plan with the fewest constraints relaxed instead of failing. A repair issue lists what was relaxed. Leave off to fail the optimization and list the constraints that conflict."

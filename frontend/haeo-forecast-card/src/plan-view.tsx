@@ -11,7 +11,7 @@ export interface PlanSummary {
   accepted_at: string;
   ended_at: string | null;
   ends: number;
-  decision: { reason: string; benefit: number | null };
+  decision: { reason: string; benefit: number | null; candidate_cost?: number };
 }
 
 export interface PlanDetail extends PlanSummary {
@@ -25,6 +25,7 @@ export interface PlanSegment {
   end: number;
   index: number;
   previousIndex: number | null;
+  previousCost?: number | undefined;
 }
 
 export interface RecorderState {
@@ -57,6 +58,7 @@ export function historicSegments(plans: PlanSummary[], now: number): PlanSegment
             start,
             end,
             index: index - ordered.length + 1,
+            previousCost: ordered[index - 1]?.decision.candidate_cost,
             previousIndex:
               index > 0 && ordered[index - 1]?.decision.reason !== "gate_disabled" ? index - ordered.length : null,
           },
@@ -221,6 +223,10 @@ export const PlanControls = observer(function PlanControls({
           {Object.keys(measurements).length ? "solid measurement traces" : "no matching measurement inputs"}
         </div>
       )}
+      {past > 0 &&
+        Object.values(measurements).some(
+          (id) => store.hass?.states[id]?.attributes["output_name"] === "battery_power_active"
+        ) && <span>Battery power trace uses the recorded optimizer output.</span>}
       {error && <div role="status">{error}</div>}
     </div>
   );
@@ -233,18 +239,39 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
 }): JSX.Element | null {
   const segment = store.hoveredPlan;
   if (!segment) return null;
-  const { plan, index, previousIndex, start, end } = segment;
+  const { plan, index, previousIndex, previousCost, start, end } = segment;
+  const nextCost = plan.decision.candidate_cost;
+  const comparisonCost =
+    previousIndex !== null && previousCost !== undefined && nextCost !== undefined ? previousCost - nextCost : null;
+  const reasons: Record<string, string> = {
+    bootstrap:
+      "There was no eligible active plan to continue, so the optimizer accepted this plan as its starting point.",
+    accepted:
+      "The candidate changed the immediate action and beat continuing the preceding action by more than the configured threshold.",
+    expired:
+      "The preceding plan could no longer cover the next dispatch interval, so the optimizer accepted a fresh plan.",
+    incumbent_infeasible:
+      "The preceding action could not satisfy the current model constraints. The optimizer accepted a feasible replacement.",
+    commitment_boundary:
+      "The next optimization interval crossed an action change in the preceding plan. The optimizer accepted a plan aligned to the new interval.",
+  };
   return (
-    <aside className="tooltip historicPlanInfo">
+    <aside className="historicPlanInfo">
       <strong>Plan {index === 0 ? "latest" : index}</strong>
       <div>{new Date(start).toLocaleString()}</div>
       <div>In action {Math.round((end - start) / 60_000)} min</div>
-      <div>{plan.decision.reason.replaceAll("_", " ")}</div>
+      <div>{reasons[plan.decision.reason] ?? plan.decision.reason.replaceAll("_", " ")}</div>
+      {nextCost !== undefined && <div>Saved plan cost {nextCost.toFixed(3)}</div>}
+      {comparisonCost !== null && (
+        <div>
+          Plan {previousIndex} cost {previousCost?.toFixed(3)} · saved cost difference {comparisonCost.toFixed(3)}
+        </div>
+      )}
       <div>
-        Benefit vs {previousIndex === null ? "previous plan" : "plan " + previousIndex}{" "}
+        Same-input benefit vs {previousIndex === null ? "previous plan" : "plan " + previousIndex}{" "}
         {plan.decision.benefit == null ? "unavailable" : plan.decision.benefit.toFixed(3)}
       </div>
-      <div>Shaded comparison shows the original forecast.</div>
+      <div>{store.pinnedPlanId ? "Pinned · click to unpin" : "Click the chart to pin"}</div>
     </aside>
   );
 });

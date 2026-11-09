@@ -514,3 +514,54 @@ ha-card {
   display: grid;
   gap: 0.2rem;
 }
+
+.axisControls,
+.planControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+}
+.axisControls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.axisControls input {
+  width: 5rem;
+}
+.historicPlanInfo {
+  position: absolute;
+  top: 0.35rem;
+  left: 0.75rem;
+  max-width: min(75%, 24rem);
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.4rem;
+  background: var(--card-background-color, white);
+  border: 1px solid var(--divider-color, #bbb);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+
+.comparisonLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.comparisonLegend i {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.55rem;
+  background: currentColor;
+}
+.comparisonLegend .historicSwatch {
+  opacity: 0.55;
+}
+.comparisonValue {
+  display: inline-block;
+  min-width: 2.5em;
+  margin-inline-end: 0.25em;
+}
+.historicValue {
+  opacity: 0.72;
+}

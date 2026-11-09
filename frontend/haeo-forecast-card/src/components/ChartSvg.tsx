@@ -153,6 +153,12 @@ export const ChartSvg = observer(function ChartSvg(props: ChartSvgProps): JSX.El
       height={store.height}
       onPointerMove={(event) => props.onPointerMove(event as unknown as PointerEvent)}
       onPointerLeave={props.onPointerLeave}
+      onClick={(event) => {
+        if (store.pinnedPlanId || store.hoveredPlan) {
+          event.stopPropagation();
+          store.toggleComparisonPin();
+        }
+      }}
     >
       <AxesLayer store={store} />
       <PlotViewport store={store} />

@@ -12,6 +12,7 @@ interface TooltipRow {
   label: string;
   value: number;
   possibleValue?: number;
+  comparison?: { current: number | undefined; historical: number | undefined };
   unit: string;
   color: string;
   lane: TooltipSectionId;
@@ -56,6 +57,16 @@ export function Tooltip(props: TooltipProps): JSX.Element | null {
   };
   return (
     <div className="tooltip">
+      {props.rows.some((row) => row.comparison) && (
+        <div className="comparisonLegend">
+          <span>
+            <i /> Current
+          </span>
+          <span>
+            <i className="historicSwatch" /> Compared
+          </span>
+        </div>
+      )}
       <div className="tooltipTime">{formatDateTime(props.panelTimeMs, props.format)}</div>
       {[...groups.entries()].map(([lane, rows]) => (
         <div key={lane} className="tooltipGroup">
@@ -72,7 +83,27 @@ export function Tooltip(props: TooltipProps): JSX.Element | null {
             >
               <span className="tooltipDot" style={{ background: row.color }} />
               <span>{row.label}</span>
-              <span>{row.lane === "window" ? "" : formatRowValue(row, props.format)}</span>
+              <span>
+                {row.comparison ? (
+                  <>
+                    <span className="comparisonValue">
+                      {row.comparison.current === undefined
+                        ? "—"
+                        : formatNumber(row.comparison.current, props.format, 2)}
+                    </span>
+                    <span className="comparisonValue historicValue">
+                      {row.comparison.historical === undefined
+                        ? "—"
+                        : formatNumber(row.comparison.historical, props.format, 2)}
+                    </span>
+                    {row.unit}
+                  </>
+                ) : row.lane === "window" ? (
+                  ""
+                ) : (
+                  formatRowValue(row, props.format)
+                )}
+              </span>
             </div>
           ))}
         </div>

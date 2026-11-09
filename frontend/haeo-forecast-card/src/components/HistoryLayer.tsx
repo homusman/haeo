@@ -47,7 +47,14 @@ function actualPoints(store: ForecastCardStore, series: ForecastSeries): Point[]
   const scale = unit === series.unit ? 1 : sourceScale && targetScale ? sourceScale / targetScale : null;
   if (scale === null) return [];
   const data = store.actuals[id] ?? [];
-  const points: Point[] = data.map(({ lu, lc, s }) => [(lu ?? lc ?? NaN) * 1000, s.trim() ? Number(s) * scale : NaN]);
+  const signedBattery = store.hass?.states[id]?.attributes["output_name"] === "battery_power_active";
+  const points: Point[] = data.map(({ lu, lc, s }) => {
+    const value = s.trim() ? Number(s) * scale : NaN;
+    return [
+      (lu ?? lc ?? NaN) * 1000,
+      signedBattery ? Math.max(0, series.outputName === "battery_power_charge" ? -value : value) : value,
+    ];
+  });
   return points.filter(([time]) => Number.isFinite(time) && time <= store.historyClock).slice(-8000);
 }
 

@@ -72,6 +72,9 @@ export class ForecastCardStore {
   hass: HassLike | null = null;
   config: ForecastCardConfig = { type: "custom:haeo-homusman-forecast-card" };
   pastHours = 0;
+  powerRange: number | null = 15;
+  priceRange: number | null = 2;
+  pinnedPlanId: string | null = null;
   historyClock = Date.now();
   historyReady = false;
   candidatePreview: PlanDetail | null = null;
@@ -154,6 +157,7 @@ export class ForecastCardStore {
 
   setSegments(segments: PlanSegment[]): void {
     this.segments = segments;
+    if (this.pinnedPlanId && !segments.some(({ plan }) => plan.id === this.pinnedPlanId)) this.pinnedPlanId = null;
     const ids = new Set(segments.map((segment) => segment.plan.id));
     this.historyDetails = Object.fromEntries(Object.entries(this.historyDetails).filter(([id]) => ids.has(id)));
   }
@@ -477,7 +481,17 @@ export class ForecastCardStore {
     return Math.max(1, Math.min(168, Math.ceil((domain.max - domain.min) / HOUR_MS)));
   }
 
+  toggleComparisonPin(): void {
+    this.pinnedPlanId = this.pinnedPlanId === null ? (this.hoveredPlan?.plan.id ?? null) : null;
+  }
+
+  setAxisRange(axis: "power" | "price", value: number): void {
+    if (axis === "power") this.powerRange = value;
+    else this.priceRange = value;
+  }
+
   get hoveredPlan(): PlanSegment | null {
+    if (this.pinnedPlanId) return this.segments.find(({ plan }) => plan.id === this.pinnedPlanId) ?? null;
     if (
       !this.pastHours ||
       this.pointerX === null ||
@@ -559,11 +573,13 @@ export class ForecastCardStore {
   }
 
   get powerBounds(): LaneBounds {
-    return this.powerBoundsCache;
+    return this.powerRange === null ? this.powerBoundsCache : { min: -this.powerRange, max: this.powerRange };
   }
 
   get priceBounds(): LaneBounds {
-    return this._bounds(this.priceSeries, { min: 0, max: 1 });
+    return this.priceRange === null
+      ? this._bounds(this.priceSeries, { min: 0, max: 1 })
+      : { min: -this.priceRange, max: this.priceRange };
   }
 
   get socBounds(): LaneBounds {
@@ -656,8 +672,10 @@ export class ForecastCardStore {
       min,
       max,
       this.horizonAnimationNowMs,
-      this.powerBoundsCache.min,
-      this.powerBoundsCache.max,
+      this.powerBounds.min,
+      this.powerBounds.max,
+      this.priceBounds.min,
+      this.priceBounds.max,
     ].join("\0");
   }
 
@@ -744,18 +762,38 @@ export class ForecastCardStore {
     possibleKey?: string;
     label: string;
     value: number;
+    comparison?: { current: number | undefined; historical: number | undefined };
     possibleValue?: number;
     unit: string;
     color: string;
     lane: TooltipSectionId;
   }> {
-    return buildTooltipRows(
+    const rows = buildTooltipRows(
       this.plottedSeries,
       this.panelIndices,
       this.normalizedSeries,
       computeHoverIndices(this.normalizedSeries, this.panelTimeMs),
       (series, value) => this.powerValueForDisplayBound(series, value)
     );
+    const selected = this.hoveredPlan;
+    const detail = selected && this.historyDetails[selected.plan.id];
+    if (!detail) return rows;
+    const current = this.visibleSeries;
+    const historic = archivedSeries(this.visibleSeries, this.hass, detail);
+    const time = this.panelTimeMs;
+    const sample = (series: ForecastSeries | undefined): number | undefined => {
+      if (!series || time < series.times[0]! || time > series.times.at(-1)!) return undefined;
+      const idx = computeHoverIndices([series], time).get(series.key);
+      const value = idx === undefined ? undefined : series.values[idx];
+      return value === undefined ? undefined : this.powerValueForDisplayBound(series, value);
+    };
+    return rows.map((row) => ({
+      ...row,
+      comparison: {
+        current: sample(current.find((item) => item.key === row.key)),
+        historical: sample(historic.find((item) => item.key === row.key)),
+      },
+    }));
   }
 
   get tooltipEmphasisKeys(): Set<string> {

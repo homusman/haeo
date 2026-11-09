@@ -15,11 +15,24 @@ export function discoverActualSources(
   series: ForecastSeries[]
 ): Record<string, string> {
   if (!hass || !config.hub_entry_id) return { ...config.actual_entities };
-  const inputs = entityIdsForHub(hass, config.hub_entry_id).map((id) => hass.states[id]?.attributes);
+  const hubIds = entityIdsForHub(hass, config.hub_entry_id);
+  const inputs = hubIds.map((id) => hass.states[id]?.attributes);
   const sources: Record<string, string> = {};
   for (const item of series) {
     const attributes = hass.states[item.entityId]?.attributes;
     if (!attributes) continue;
+    if (item.outputName === "battery_power_charge" || item.outputName === "battery_power_discharge") {
+      const battery = hubIds.find((id) => {
+        const source = hass.states[id]?.attributes;
+        return (
+          source?.["element_name"] === attributes["element_name"] &&
+          source?.["element_type"] === "battery" &&
+          source?.["output_name"] === "battery_power_active"
+        );
+      });
+      if (battery) sources[item.entityId] = battery;
+      continue;
+    }
     const field = inputForOutput[item.outputName];
     const matches = field
       ? inputs.filter(

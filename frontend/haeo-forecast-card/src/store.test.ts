@@ -529,3 +529,39 @@ it("replaces current forecast series with candidate data and restores current on
   store.setCandidatePreview(null);
   expect(store.powerSeries[0]).toBe(current);
 });
+
+it("pins comparison across pointer changes and keeps axis ranges fixed", () => {
+  const store = new ForecastCardStore();
+  store.setConfig(testConfig);
+  store.setHass(loadScenarioHassState("scenario2"));
+  const now = store.fullXDomain.min;
+  store.setHistoryClock(now);
+  store.setPastHours(1);
+  store.setAxisRange("power", 8);
+  store.setAxisRange("price", 0.75);
+  store.setSegments([
+    {
+      plan: {
+        id: "old",
+        accepted_at: new Date(now - 3600_000).toISOString(),
+        ended_at: null,
+        ends: (now + 3600_000) / 1000,
+        decision: { reason: "accepted", benefit: 0.1 },
+      },
+      start: now - 3600_000,
+      end: now,
+      index: -1,
+      previousIndex: -2,
+    },
+  ]);
+  store.setPointer(store.margins.left + 1, store.plotTop + 5);
+  store.toggleComparisonPin();
+  store.setPointer(null, null);
+  expect(store.hoveredPlan?.plan.id).toBe("old");
+  store.togglePowerDisplayMode();
+  expect(store.powerBounds).toEqual({ min: -8, max: 8 });
+  expect(store.priceBounds).toEqual({ min: -0.75, max: 0.75 });
+  expect(store.socBounds).toEqual({ min: 0, max: 100 });
+  store.toggleComparisonPin();
+  expect(store.hoveredPlan).toBeNull();
+});

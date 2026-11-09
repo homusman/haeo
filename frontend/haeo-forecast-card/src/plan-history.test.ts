@@ -74,3 +74,13 @@ describe("history segments", () => {
     ).toEqual([]);
   });
 });
+
+it("carries the previous saved cost when a same-input benefit is unavailable", () => {
+  const first = plan(10);
+  first.decision.candidate_cost = 2.5;
+  const next = plan(20, "incumbent_infeasible");
+  next.decision.candidate_cost = 2;
+  const segments = historicSegments([next, first], 30_000);
+  expect(segments[1]?.previousCost).toBe(2.5);
+  expect(segments[1]?.plan.decision.benefit).toBeNull();
+});

@@ -40,3 +40,26 @@ it("uses the battery SoC input from the selected hub and keeps explicit override
   });
   expect(discoverActualSources(hass, config, series)).toEqual({});
 });
+
+it("uses a battery's own recorded net power for its directional forecast traces", () => {
+  const attributes = { element_name: "Battery", element_type: "battery" };
+  const hass: HassLike = {
+    states: {
+      "sensor.charge": { entity_id: "sensor.charge", attributes },
+      "sensor.net": { entity_id: "sensor.net", attributes: { ...attributes, output_name: "battery_power_active" } },
+      "sensor.other_net": {
+        entity_id: "sensor.other_net",
+        attributes: { ...attributes, output_name: "battery_power_active" },
+      },
+    },
+    entities: {
+      "sensor.charge": { device_id: "fork" },
+      "sensor.net": { device_id: "fork" },
+      "sensor.other_net": { device_id: "vanilla" },
+    },
+    devices: { fork: { config_entries: ["fork"] }, vanilla: { config_entries: ["vanilla"] } },
+  };
+  const config = { type: "custom:haeo-homusman-forecast-card", hub_entry_id: "fork" } as const;
+  const series = [{ entityId: "sensor.charge", outputName: "battery_power_charge" } as ForecastSeries];
+  expect(discoverActualSources(hass, config, series)).toEqual({ "sensor.charge": "sensor.net" });
+});

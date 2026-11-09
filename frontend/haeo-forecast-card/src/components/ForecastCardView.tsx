@@ -1,4 +1,5 @@
 import type { JSX } from "preact";
+import { useEffect } from "preact/hooks";
 import { mdiIcons } from "../mdi-icons";
 
 import { HistoricPlanInfo, PlanControls } from "../plan-view";
@@ -165,6 +166,15 @@ const TooltipSection = observer(function TooltipSection(props: { store: Forecast
 });
 
 export const ForecastCardView = observer(function ForecastCardView(props: ForecastCardViewProps): JSX.Element {
+  const pinned = props.store.pinnedPlanId;
+  useEffect(() => {
+    if (!pinned) return;
+    const unpin = (): void => {
+      if (props.store.pinnedPlanId) props.store.toggleComparisonPin();
+    };
+    window.addEventListener("click", unpin);
+    return () => window.removeEventListener("click", unpin);
+  }, [pinned, props.store]);
   const emptyReason = forecastEmptyReason(props.store.hass, props.store.config, props.store.hasData);
 
   if (emptyReason === "loading") {
@@ -189,7 +199,32 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
   return (
     <ha-card>
       <CardTitle store={props.store} />
-      <PlanControls key={props.store.config.hub_entry_id} store={props.store} />
+      <div className="axisControls">
+        <label>
+          Power ±{props.store.powerRange ?? 15} kW
+          <input
+            aria-label="Power range"
+            type="range"
+            min={1}
+            max={100}
+            step={1}
+            value={props.store.powerRange ?? 15}
+            onInput={(event) => props.store.setAxisRange("power", Number(event.currentTarget.value))}
+          />
+        </label>
+        <label>
+          Price ±{props.store.priceRange ?? 2}/kWh
+          <input
+            aria-label="Price range"
+            type="range"
+            min={0.05}
+            max={20}
+            step={0.05}
+            value={props.store.priceRange ?? 2}
+            onInput={(event) => props.store.setAxisRange("price", Number(event.currentTarget.value))}
+          />
+        </label>
+      </div>
       <div className="chartRow">
         <div className="chartContainer">
           {props.store.hasData ? (
@@ -201,14 +236,12 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           ) : (
             <div className="empty">{t(props.store.locale, "card.empty.no_data")}</div>
           )}
-        </div>
-        {props.store.hoveredPlan ? (
           <HistoricPlanInfo store={props.store} />
-        ) : (
-          props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />
-        )}
+        </div>
+        {props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />}
       </div>
       {props.store.hasData && <LegendSection store={props.store} />}
+      <PlanControls key={props.store.config.hub_entry_id} store={props.store} />
     </ha-card>
   );
 });
