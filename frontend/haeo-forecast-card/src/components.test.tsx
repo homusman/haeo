@@ -1,6 +1,6 @@
 import { render } from "preact";
 import { act } from "preact/test-utils";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { ForecastCardView } from "./components/ForecastCardView";
 import { Legend } from "./components/Legend";
@@ -8,6 +8,8 @@ import { loadScenarioHassState, withSingleHubRegistry } from "./fixtures/scenari
 import { normalizeSeries } from "./series";
 import { ForecastCardStore } from "./store";
 import type { HassLike } from "./series";
+
+beforeEach(() => localStorage.clear());
 
 const testFixture: HassLike = withSingleHubRegistry({
   states: {
@@ -125,7 +127,7 @@ describe("ForecastCardView components", () => {
       },
     ]);
     store.setPointer(store.margins.left + 2, store.plotTop + 5);
-    store.toggleComparisonPin();
+    void store.selectComparisonAtCursor();
     act(() => {
       render(<ForecastCardView store={store} onPointerMove={() => undefined} onPointerLeave={() => undefined} />, root);
     });
@@ -134,7 +136,7 @@ describe("ForecastCardView components", () => {
     expect(layout?.querySelectorAll(":scope > .comparisonInfo > .tooltip")).toHaveLength(1);
     root.querySelector<HTMLInputElement>('input[aria-label="Price range"]')!.click();
     expect(store.pinnedPlanId).toBe("old");
-    window.dispatchEvent(new MouseEvent("click"));
+    layout?.querySelector("svg")?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
     expect(store.pinnedPlanId).toBeNull();
   });
 

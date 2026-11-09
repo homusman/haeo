@@ -39,7 +39,7 @@ export interface RecorderState {
 interface ArchivePage {
   plans: PlanSummary[];
   measurements?: Record<string, PowerMeasurement>;
-  decision?: { status?: string; last_run?: string; benefit?: number | null };
+  decision?: { status?: string; last_run?: string; benefit?: number | null; accepted?: boolean };
   archive: { plans: number; bytes: number };
 }
 
@@ -76,6 +76,11 @@ export const PlanControls = observer(function PlanControls({
   store: ForecastCardStore;
 }): JSX.Element | null {
   const [decision, setDecision] = useState<ArchivePage["decision"]>();
+  const [clock, setClock] = useState(Date.now);
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
   const [archive, setArchive] = useState<ArchivePage["archive"] | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -182,6 +187,7 @@ export const PlanControls = observer(function PlanControls({
         purge: true,
       });
       if (page) setArchive(page.archive);
+      if (store.pinnedPlanId) store.clearComparison();
       store.setSegments([]);
       setRevision((value) => value + 1);
       setError("");
@@ -192,30 +198,9 @@ export const PlanControls = observer(function PlanControls({
     }
   }
 
-  async function previewCandidate(): Promise<void> {
-    if (store.candidatePreview) {
-      store.setCandidatePreview(null);
-      return;
-    }
-    try {
-      const plan = await latestHass.current?.callWS?.<PlanDetail>({
-        type: "haeo_homusman/plans",
-        entry_id: hub,
-        plan_id: "candidate",
-      });
-      if (plan && store.config.hub_entry_id === hub) store.setCandidatePreview(plan);
-    } catch {
-      setError("Candidate forecast unavailable.");
-    }
-  }
-
   if (!enabled) return null;
   return (
     <div className="planControls">
-      <button type="button" aria-pressed={store.candidatePreview !== null} onClick={() => void previewCandidate()}>
-        {store.candidatePreview ? "Show current plan" : "Show candidate plan"}
-      </button>{" "}
-      {store.candidatePreview && <strong>Candidate view</strong>}{" "}
       {archive && (
         <span>
           {archive.plans} saved · {(archive.bytes / 1024).toFixed(1)} KiB{" "}
@@ -232,20 +217,43 @@ export const PlanControls = observer(function PlanControls({
       )}
       <div className="optimizerSummary">
         Optimiser {decision?.status ?? "pending"} · Benefit {decision?.benefit?.toFixed(3) ?? "—"} · Last run{" "}
-        {decision?.last_run ? new Date(decision.last_run).toLocaleString() : "—"}
+        {decision?.last_run ? formatRunAge(clock - Date.parse(decision.last_run)) : "—"}
+        {decision?.accepted !== undefined && (decision.accepted ? " · Accepted" : " · Not accepted")}
       </div>
-      {error && <div role="status">{error}</div>}
+      {(error || store.comparisonError) && <div role="status">{error || store.comparisonError}</div>}
     </div>
   );
 });
+
+function formatRunAge(milliseconds: number): string {
+  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
+  if (!Number.isFinite(seconds)) return "—";
+  if (seconds < 60) return seconds + "s ago";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m " + (seconds % 60) + "s ago";
+  return Math.floor(seconds / 3600) + "h " + Math.floor((seconds % 3600) / 60) + "m ago";
+}
 
 export const HistoricPlanInfo = observer(function HistoricPlanInfo({
   store,
 }: {
   store: ForecastCardStore;
 }): JSX.Element | null {
-  const segment = store.hoveredPlan;
-  if (!segment) return null;
+  const segment =
+    store.hoveredPlan ?? store.segments.find(({ plan }) => plan.id === store.pinnedPlanId) ?? store.pinnedSegment;
+  const selection = store.pinnedPlanId || store.candidatePreview;
+  const clear = selection ? (
+    <button type="button" onClick={() => store.clearComparison()}>
+      Clear comparison
+    </button>
+  ) : null;
+  if (!segment)
+    return (
+      <aside className="historicPlanInfo" title="Hover over a past plan to see the acceptance decision.">
+        <strong>{store.candidatePreview ? "Candidate selected" : "Plan details"}</strong>
+        <div>Hover over a saved plan to see why it was accepted.</div>
+        {clear}
+      </aside>
+    );
   const { plan, index, previousIndex, previousCost, start, end } = segment;
   const nextCost = plan.decision.candidate_cost;
   const comparisonCost =
@@ -278,7 +286,7 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
         Same-input benefit vs {previousIndex === null ? "previous plan" : "plan " + previousIndex}{" "}
         {plan.decision.benefit == null ? "unavailable" : plan.decision.benefit.toFixed(3)}
       </div>
-      <div>{store.pinnedPlanId ? "Pinned · click to unpin" : "Click the chart to pin"}</div>
+      {clear}
     </aside>
   );
 });

@@ -648,3 +648,32 @@ ha-card.forecastCard {
     width: auto;
   }
 }
+
+.chartLabel,
+.planHoverLabel {
+  position: absolute;
+  top: 0.2rem;
+  z-index: 1;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.2rem;
+  background: var(--haeo-bg);
+  font-size: 0.75rem;
+  pointer-events: none;
+}
+.chartLabel {
+  right: 0.6rem;
+  font-weight: 600;
+}
+.planHoverLabel {
+  border: 1px solid var(--haeo-divider);
+}
+.comparisonPlaceholder {
+  position: absolute;
+  inset: 1.5rem 1rem 0.5rem;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--haeo-divider);
+  color: var(--haeo-subtext);
+  font-size: 0.85rem;
+  text-align: center;
+}

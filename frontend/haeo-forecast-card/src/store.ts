@@ -76,9 +76,12 @@ export class ForecastCardStore {
   powerRange: number | null = 15;
   priceRange: number | null = 2;
   pinnedPlanId: string | null = null;
+  pinnedSegment: PlanSegment | null = null;
   historyClock = Date.now();
   historyReady = false;
   candidatePreview: PlanDetail | null = null;
+  comparisonError = "";
+  private comparisonRequest = 0;
   segments: PlanSegment[] = [];
   historyDetails: Record<string, PlanDetail> = {};
   powerMeasurements: Record<string, PowerMeasurement> = {};
@@ -145,6 +148,7 @@ export class ForecastCardStore {
 
   setPastHours(hours: number): void {
     this.pastHours = Math.min(this.historyLimitHours, Math.max(0, hours));
+    this.saveRangeSettings();
   }
 
   setHistoryClock(now: number): void {
@@ -154,14 +158,12 @@ export class ForecastCardStore {
 
   setCandidatePreview(plan: PlanDetail | null): void {
     this.candidatePreview = plan;
-    this.seriesDataRevision += 1;
-    this.recomputePowerBounds();
   }
 
   setSegments(segments: PlanSegment[]): void {
     this.segments = segments;
-    if (this.pinnedPlanId && !segments.some(({ plan }) => plan.id === this.pinnedPlanId)) this.pinnedPlanId = null;
     const ids = new Set(segments.map((segment) => segment.plan.id));
+    if (this.pinnedPlanId) ids.add(this.pinnedPlanId);
     this.historyDetails = Object.fromEntries(Object.entries(this.historyDetails).filter(([id]) => ids.has(id)));
   }
 
@@ -179,7 +181,11 @@ export class ForecastCardStore {
 
   get pinnedComparisonSeries(): ForecastSeries[] {
     const detail = this.pinnedPlanId && this.historyDetails[this.pinnedPlanId];
-    return detail ? archivedSeries(this.visibleSeries, this.hass, detail) : [];
+    return this.candidatePreview
+      ? this.candidateSeries
+      : detail
+        ? archivedSeries(this.visibleSeries, this.hass, detail)
+        : [];
   }
 
   setActuals(actuals: Record<string, RecorderState[]>): void {
@@ -189,7 +195,8 @@ export class ForecastCardStore {
   setConfig(config: ForecastCardConfig): void {
     if (this.config.hub_entry_id !== config.hub_entry_id) {
       this.setSegments([]);
-      this.setCandidatePreview(null);
+      this.clearComparison();
+      this.restoreRangeSettings(config.hub_entry_id);
       this.setActuals({});
       this.setPowerMeasurements({});
     }
@@ -360,6 +367,10 @@ export class ForecastCardStore {
   }
 
   get plottedSeries(): ForecastSeries[] {
+    return this.visibleSeries;
+  }
+
+  get candidateSeries(): ForecastSeries[] {
     const candidate = this.candidatePreview;
     if (!candidate) return this.visibleSeries;
     const candidateSeries = new Map(
@@ -501,18 +512,92 @@ export class ForecastCardStore {
     return Math.max(1, Math.min(168, Math.ceil((domain.max - domain.min) / HOUR_MS)));
   }
 
-  toggleComparisonPin(): void {
-    this.pinnedPlanId = this.pinnedPlanId === null ? (this.hoveredPlan?.plan.id ?? null) : null;
+  clearComparison(): void {
+    this.comparisonRequest += 1;
+    this.pinnedPlanId = null;
+    this.pinnedSegment = null;
+    this.setCandidatePreview(null);
+    this.comparisonError = "";
+  }
+
+  async selectComparisonAtCursor(): Promise<void> {
+    if (!this.isHoverInPlot) return;
+    const segment = this.hoveredPlan;
+    if (segment) {
+      this.clearComparison();
+      this.pinnedPlanId = segment.plan.id;
+      this.pinnedSegment = segment;
+    } else if ((this.hoverTimeMs ?? -Infinity) >= this.historyClock) {
+      await this.selectCandidate();
+    }
+  }
+
+  async selectCandidate(): Promise<void> {
+    this.clearComparison();
+    const request = this.comparisonRequest;
+    const entry = this.config.hub_entry_id;
+    if (!entry || !this.hass?.callWS) return;
+    try {
+      const plan = await this.hass.callWS<PlanDetail>({
+        type: "haeo_homusman/plans",
+        entry_id: entry,
+        plan_id: "candidate",
+      });
+      if (request === this.comparisonRequest) this.setCandidatePreview(plan);
+    } catch {
+      if (request === this.comparisonRequest) this.setComparisonError("Candidate forecast unavailable.");
+    }
+  }
+
+  private setComparisonError(error: string): void {
+    this.comparisonError = error;
+  }
+
+  get comparisonLabel(): string {
+    if (this.candidatePreview) return "Candidate";
+    const plan = this.segments.find(({ plan }) => plan.id === this.pinnedPlanId) ?? this.pinnedSegment;
+    return plan ? (plan.index ? "Plan " + plan.index : "Latest accepted plan") : "Comparison";
   }
 
   setAxisRange(axis: "power" | "price", value: number): void {
     if (!Number.isFinite(value) || value <= 0) return;
     if (axis === "power") this.powerRange = value;
     else this.priceRange = value;
+    this.saveRangeSettings();
+  }
+
+  private saveRangeSettings(): void {
+    if (!this.config.hub_entry_id) return;
+    try {
+      localStorage.setItem(
+        "haeo-homusman-ranges:" + this.config.hub_entry_id,
+        JSON.stringify({
+          power: this.powerRange,
+          price: this.priceRange,
+          past: this.pastHours,
+        })
+      );
+    } catch {
+      /* Storage can be disabled in private sessions. */
+    }
+  }
+
+  private restoreRangeSettings(hub?: string): void {
+    this.powerRange = 15;
+    this.priceRange = 2;
+    this.pastHours = 0;
+    if (!hub) return;
+    try {
+      const value = JSON.parse(localStorage.getItem("haeo-homusman-ranges:" + hub) ?? "{}");
+      if (Number.isFinite(value.power) && value.power > 0) this.powerRange = value.power;
+      if (Number.isFinite(value.price) && value.price > 0) this.priceRange = value.price;
+      if (Number.isFinite(value.past) && value.past >= 0) this.pastHours = Math.min(168, value.past);
+    } catch {
+      /* An invalid saved value falls back to defaults. */
+    }
   }
 
   get hoveredPlan(): PlanSegment | null {
-    if (this.pinnedPlanId) return this.segments.find(({ plan }) => plan.id === this.pinnedPlanId) ?? null;
     if (
       !this.pastHours ||
       this.pointerX === null ||
@@ -796,10 +881,9 @@ export class ForecastCardStore {
       computeHoverIndices(this.normalizedSeries, this.panelTimeMs),
       (series, value) => this.powerValueForDisplayBound(series, value)
     );
-    const detail = this.pinnedPlanId && this.historyDetails[this.pinnedPlanId];
-    if (!detail && !this.pastHours) return rows;
+    if (!this.pinnedPlanId && !this.candidatePreview && !this.pastHours) return rows;
     const current = this.visibleSeries;
-    const historic = detail ? archivedSeries(this.visibleSeries, this.hass, detail) : [];
+    const historic = this.pinnedComparisonSeries;
     const time = this.panelTimeMs;
     const sample = (series: ForecastSeries | undefined): number | undefined => {
       if (!series || time < series.times[0]! || time > series.times.at(-1)!) return undefined;

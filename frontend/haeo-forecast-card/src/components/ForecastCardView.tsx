@@ -1,5 +1,4 @@
 import type { JSX } from "preact";
-import { useEffect } from "preact/hooks";
 import { mdiIcons } from "../mdi-icons";
 
 import { HistoricPlanInfo, PlanControls } from "../plan-view";
@@ -159,6 +158,7 @@ const TooltipSection = observer(function TooltipSection(props: { store: Forecast
     <Tooltip
       format={props.store.format}
       panelTimeMs={props.store.panelTimeMs}
+      comparisonLabel={props.store.comparisonLabel}
       rows={props.store.tooltipRows}
       emphasizedKeys={props.store.tooltipEmphasisKeys}
     />
@@ -166,20 +166,9 @@ const TooltipSection = observer(function TooltipSection(props: { store: Forecast
 });
 
 export const ForecastCardView = observer(function ForecastCardView(props: ForecastCardViewProps): JSX.Element {
-  const pinned = props.store.pinnedPlanId;
-  useEffect(() => {
-    if (!pinned) return;
-    const unpin = (event: MouseEvent): void => {
-      const adjustsScale = event
-        .composedPath()
-        .some(
-          (node) => node instanceof Element && node.matches(".axisControls, .horizonSelectors, .powerModeToggleButton")
-        );
-      if (!adjustsScale && props.store.pinnedPlanId) props.store.toggleComparisonPin();
-    };
-    window.addEventListener("click", unpin);
-    return () => window.removeEventListener("click", unpin);
-  }, [pinned, props.store]);
+  const selected = props.store.pinnedPlanId || props.store.candidatePreview;
+  const hovered = props.store.hoveredPlan;
+  const hoverX = props.store.hoverX;
   const emptyReason = forecastEmptyReason(props.store.hass, props.store.config, props.store.hasData);
 
   if (emptyReason === "loading") {
@@ -234,12 +223,20 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           />
         </label>
       </div>
-      <div
-        className={["comparisonLayout", pinned && "isPinned", props.store.tooltipVisible && "hasInfo"]
-          .filter(Boolean)
-          .join(" ")}
-      >
+      <div className={["comparisonLayout", "isPinned", "hasInfo"].filter(Boolean).join(" ")}>
         <div className="chartContainer primaryChart">
+          <span className="chartLabel">Current plan</span>
+          {props.store.isHoverInPlot && hoverX !== null && (
+            <span className="planHoverLabel" style={{ left: "clamp(0px, " + hoverX + "px, calc(100% - 9rem))" }}>
+              {hovered
+                ? hovered.index
+                  ? "Plan " + hovered.index
+                  : "Latest accepted plan"
+                : (props.store.hoverTimeMs ?? -Infinity) >= props.store.historyClock
+                  ? "Current plan"
+                  : "No saved plan"}
+            </span>
+          )}
           {props.store.hasData ? (
             <ChartSection
               store={props.store}
@@ -250,22 +247,31 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
             <div className="empty">{t(props.store.locale, "card.empty.no_data")}</div>
           )}
         </div>
-        {pinned && (
-          <div className="chartContainer comparisonChart">
+        <div
+          className="chartContainer comparisonChart"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            props.store.clearComparison();
+          }}
+        >
+          <span className="chartLabel">{props.store.comparisonLabel}</span>
+          {selected ? (
             <ChartSvg
               store={props.store}
               comparison
               onPointerMove={props.onPointerMove}
               onPointerLeave={props.onPointerLeave}
             />
-          </div>
-        )}
-        {props.store.hasData && (props.store.tooltipVisible || pinned) && (
-          <div className="comparisonInfo">
-            {pinned && <HistoricPlanInfo store={props.store} />}
-            {props.store.tooltipVisible && <TooltipSection store={props.store} />}
-          </div>
-        )}
+          ) : (
+            <div className="comparisonPlaceholder" title="Click a past plan or the future of the upper chart.">
+              Click a past plan or the future of the upper chart.
+            </div>
+          )}
+        </div>
+        <div className="comparisonInfo">
+          {props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />}
+          <HistoricPlanInfo store={props.store} />
+        </div>
       </div>
       {props.store.hasData && <LegendSection store={props.store} />}
       <PlanControls key={props.store.config.hub_entry_id} store={props.store} />

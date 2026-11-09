@@ -1,8 +1,10 @@
 import { autorun, isObservable } from "mobx";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ForecastCardStore } from "./store";
 import { DEFAULT_TEST_HUB, loadScenarioHassState, withSingleHubRegistry } from "./fixtures/scenarioOutputs";
+
+beforeEach(() => localStorage.clear());
 
 const testConfig = { type: "custom:haeo-homusman-forecast-card" as const, hub_entry_id: DEFAULT_TEST_HUB };
 
@@ -499,7 +501,7 @@ it("keeps the selected future horizon fixed while hovering an older plan", () =>
   expect(store.xDomain.max).toBe(end);
 });
 
-it("replaces current forecast series with candidate data and restores current on exit", () => {
+it("renders the candidate in the comparison pane without changing the current chart", () => {
   const store = new ForecastCardStore();
   store.setConfig(testConfig);
   store.setHass(loadScenarioHassState("scenario2"));
@@ -524,12 +526,13 @@ it("replaces current forecast series with candidate data and restores current on
       },
     },
   });
-  expect(store.powerSeries.filter((item) => item.sourceRole === "output")).toHaveLength(1);
-  expect(store.powerSeries.find((item) => item.key === current.key)?.values[0]).toBe(25);
-  expect(store.powerShapes[0]?.d).toBeTruthy();
-  expect(store.priceSeries.filter((item) => item.sourceRole !== "output")).toEqual(priceInputs);
-  store.setCandidatePreview(null);
   expect(store.powerSeries.find((item) => item.key === current.key)).toBe(current);
+  expect(store.pinnedComparisonSeries.find((item) => item.key === current.key)?.values[0]).toBe(25);
+  expect(store.pinnedComparisonSeries.filter((item) => item.lane === "price" && item.sourceRole !== "output")).toEqual(
+    priceInputs
+  );
+  store.clearComparison();
+  expect(store.pinnedComparisonSeries).toEqual([]);
 });
 
 it("pins comparison across pointer changes and keeps axis ranges fixed", () => {
@@ -557,15 +560,15 @@ it("pins comparison across pointer changes and keeps axis ranges fixed", () => {
     },
   ]);
   store.setPointer(store.margins.left + 1, store.plotTop + 5);
-  store.toggleComparisonPin();
+  void store.selectComparisonAtCursor();
   store.setPointer(null, null);
-  expect(store.hoveredPlan?.plan.id).toBe("old");
+  expect(store.pinnedPlanId).toBe("old");
   store.togglePowerDisplayMode();
   expect(store.powerBounds).toEqual({ min: -8, max: 8 });
   expect(store.priceBounds).toEqual({ min: -0.75, max: 0.75 });
   expect(store.socBounds).toEqual({ min: 0, max: 100 });
-  store.toggleComparisonPin();
-  expect(store.hoveredPlan).toBeNull();
+  store.clearComparison();
+  expect(store.pinnedPlanId).toBeNull();
 });
 
 it("keeps cursor time available before the earliest archived plan", () => {
@@ -578,4 +581,56 @@ it("keeps cursor time available before the earliest archived plan", () => {
   store.setPointer(store.margins.left + 1, store.plotTop + 5);
   expect(store.hoveredPlan).toBeNull();
   expect(store.hoverTimeMs).toBeLessThan(now);
+});
+
+it("restores ranges and history for the same hub in a new card", () => {
+  const store = new ForecastCardStore();
+  store.setConfig(testConfig);
+  store.setHass(loadScenarioHassState("scenario2"));
+  store.setAxisRange("power", 12);
+  store.setAxisRange("price", 0.125);
+  store.setPastHours(2);
+  const reopened = new ForecastCardStore();
+  reopened.setConfig(testConfig);
+  expect([reopened.powerRange, reopened.priceRange, reopened.pastHours]).toEqual([12, 0.125, 2]);
+  reopened.setConfig({ ...testConfig, hub_entry_id: "another-hub" });
+  expect([reopened.powerRange, reopened.priceRange, reopened.pastHours]).toEqual([15, 2, 0]);
+});
+
+it("switches the selected pane directly from history to candidate", async () => {
+  const store = new ForecastCardStore();
+  const hass = loadScenarioHassState("scenario2");
+  const candidate = { id: "candidate", boundaries: [], series: {} };
+  const callWS = vi.fn(async () => candidate) as NonNullable<typeof hass.callWS>;
+  store.setConfig(testConfig);
+  store.setHass({ ...hass, callWS });
+  const now = store.fullXDomain.min;
+  store.setHistoryClock(now);
+  store.setPastHours(2);
+  const entry = (id: string, start: number, end: number) => ({
+    plan: {
+      id,
+      accepted_at: new Date(start).toISOString(),
+      ended_at: null,
+      ends: end / 1000,
+      decision: { reason: "accepted", benefit: null },
+    },
+    start,
+    end,
+    index: -1,
+    previousIndex: -2,
+  });
+  store.setSegments([entry("older", now - 7200_000, now - 3600_000), entry("newer", now - 3600_000, now)]);
+  store.setPointer(store.xScale(now - 5400_000), store.plotTop + 4);
+  await store.selectComparisonAtCursor();
+  expect(store.pinnedPlanId).toBe("older");
+  store.setPointer(store.xScale(now - 1800_000), store.plotTop + 4);
+  await store.selectComparisonAtCursor();
+  expect(store.pinnedPlanId).toBe("newer");
+  store.setSegments([]);
+  expect(store.pinnedPlanId).toBe("newer");
+  store.setPointer(store.xScale(now + 60_000), store.plotTop + 4);
+  await store.selectComparisonAtCursor();
+  expect(store.pinnedPlanId).toBeNull();
+  expect(store.candidatePreview?.id).toBe("candidate");
 });

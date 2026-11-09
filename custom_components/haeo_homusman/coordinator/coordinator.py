@@ -848,8 +848,10 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 previous.actions if previous else None,
                 threshold,
             )
+        accepted = reason not in ("same_action", "below_threshold")
         self.plan_decision = {
             "reason": reason,
+            "accepted": accepted,
             "status": "success",
             "last_run": datetime.now(UTC).isoformat(),
             "candidate_cost": cost,
@@ -857,7 +859,6 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "benefit": None if benchmark is None else benchmark - cost,
             "threshold": threshold if gate else 0.0,
         }
-        accepted = reason not in ("same_action", "below_threshold")
         await self.plan_history.record(candidate, self.plan_decision, accepted)
         if not accepted and previous is not None:
             return self._rebase_accepted(previous, candidate.boundaries[0])

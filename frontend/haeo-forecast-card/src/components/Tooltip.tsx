@@ -21,6 +21,7 @@ interface TooltipRow {
 interface TooltipProps {
   format: DisplayFormat;
   panelTimeMs: number;
+  comparisonLabel?: string;
   rows: TooltipRow[];
   emphasizedKeys: Set<string>;
 }
@@ -63,7 +64,7 @@ export function Tooltip(props: TooltipProps): JSX.Element | null {
             <i /> Current
           </span>
           <span>
-            <i className="historicSwatch" /> Pinned plan
+            <i className="historicSwatch" /> {props.comparisonLabel ?? "Pinned plan"}
           </span>
           <span>
             <i className="measuredSwatch" /> Measured

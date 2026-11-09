@@ -176,11 +176,20 @@ export const ChartSvg = observer(function ChartSvg(props: ChartSvgProps): JSX.El
       height={store.height}
       onPointerMove={(event) => props.onPointerMove(event as unknown as PointerEvent)}
       onPointerLeave={props.onPointerLeave}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        store.clearComparison();
+      }}
       onClick={(event) => {
-        if (store.pinnedPlanId || store.hoveredPlan) {
-          event.stopPropagation();
-          store.toggleComparisonPin();
+        if (props.comparison) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (bounds.width && bounds.height) {
+          store.setPointer(
+            ((event.clientX - bounds.left) / bounds.width) * store.width,
+            ((event.clientY - bounds.top) / bounds.height) * store.height
+          );
         }
+        void store.selectComparisonAtCursor();
       }}
     >
       <AxesLayer store={store} />
