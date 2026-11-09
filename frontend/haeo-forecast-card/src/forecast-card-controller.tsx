@@ -22,7 +22,7 @@ export class ForecastCardController {
   private resizeObserver: ResizeObserver | null = null;
   private pointerFrameHandle = 0;
   private pointerFlushScheduled = false;
-  private pendingPointer: { x: number | null; y: number | null } | null = null;
+  private pendingPointer: { x: number | null; y: number | null; comparison: boolean } | null = null;
   private hasRenderedHost = false;
   private lastReportedCardSize: number | null = null;
 
@@ -170,15 +170,15 @@ export class ForecastCardController {
     const inverse = screenCtm.inverse();
     const x = Math.round(event.clientX * inverse.a + event.clientY * inverse.c + inverse.e);
     const y = Math.round(event.clientX * inverse.b + event.clientY * inverse.d + inverse.f);
-    this.schedulePointerUpdate(x, y);
+    this.schedulePointerUpdate(x, y, svgElement.dataset["comparison"] === "true");
   }
 
   private onPointerLeave(): void {
     this.schedulePointerUpdate(null, null);
   }
 
-  private schedulePointerUpdate(x: number | null, y: number | null): void {
-    this.pendingPointer = { x, y };
+  private schedulePointerUpdate(x: number | null, y: number | null, comparison = false): void {
+    this.pendingPointer = { x, y, comparison };
     if (this.pointerFlushScheduled) {
       return;
     }
@@ -200,14 +200,14 @@ export class ForecastCardController {
       if (this.store.pointerX !== null && this.store.pointerY !== null) {
         const deltaX = Math.abs(this.store.pointerX - pending.x);
         const deltaY = Math.abs(this.store.pointerY - pending.y);
-        if (deltaX < 1 && deltaY < 1) {
+        if (deltaX < 1 && deltaY < 1 && this.store.pointerComparison === pending.comparison) {
           return;
         }
       }
       if (this.store.pointerX === pending.x && this.store.pointerY === pending.y) {
         return;
       }
-      this.store.setPointer(pending.x, pending.y);
+      this.store.setPointer(pending.x, pending.y, pending.comparison);
     });
   }
 

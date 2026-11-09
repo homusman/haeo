@@ -1,3 +1,4 @@
+import { downsampleRecorderStates } from "./actual-points";
 import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { observer } from "./mobx-observer";
@@ -179,7 +180,13 @@ export const PlanControls = observer(function PlanControls({
           no_attributes: true,
           significant_changes_only: false,
         });
-        if (!cancelled && result) store.setActuals(result);
+        if (!cancelled && result) {
+          store.setActuals(
+            Object.fromEntries(
+              Object.entries(result).map(([id, states]) => [id, downsampleRecorderStates(states, past * HOUR)])
+            )
+          );
+        }
       } catch {
         if (!cancelled) store.setActuals({});
       }

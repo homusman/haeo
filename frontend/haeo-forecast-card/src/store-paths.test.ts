@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computeSocPaths } from "./store-paths";
+import { computePowerDifferences, computeSocPaths } from "./store-paths";
 import type { ForecastSeries } from "./types";
 
 function socSeries(overrides: Partial<ForecastSeries>): ForecastSeries {
@@ -44,4 +44,27 @@ describe("computeSocPaths", () => {
 
     expect(paths.map((path) => path.className)).toEqual([undefined, "thresholdLine", "thresholdLine"]);
   });
+});
+
+it("shades the exact power difference over common intervals in both directions", () => {
+  const series = socSeries({
+    key: "export",
+    lane: "power",
+    outputType: "power",
+    elementType: "grid",
+    outputName: "grid_power_export",
+    direction: "-",
+    drawType: "step",
+    times: Float64Array.from([0, 10, 20]),
+    values: Float64Array.from([1, 3, 0]),
+  });
+  const comparison = { ...series, times: Float64Array.from([5, 15, 25]), values: Float64Array.from([2, 2, 0]) };
+  const selected = new Set(["export"]);
+  const range = { min: 0, max: 25 };
+  const identity = (value: number): number => value;
+  const paths = computePowerDifferences([series], [comparison], selected, range, "overlay", identity, identity);
+  expect(paths.map(({ direction }) => direction)).toEqual(["higher", "lower"]);
+  expect(paths[0]?.path).toBe("M 5 1 H 10 V 2 H 5 Z ");
+  expect(paths[1]?.path).toBe("M 10 3 H 15 V 2 H 10 Z M 15 3 H 20 V 2 H 15 Z ");
+  expect(computePowerDifferences([series], [comparison], new Set(), range, "overlay", identity, identity)).toEqual([]);
 });

@@ -1,3 +1,4 @@
+import { downsampleRecorderStates } from "./actual-points";
 import { describe, expect, it } from "vitest";
 import { archivedSeries, clipPlanPoints } from "./archived-series";
 import { historicSegments, type PlanSummary } from "./plan-view";
@@ -117,4 +118,17 @@ it("loads the pinned tariff from its archived input instead of a live tariff", (
   expect(Array.from(archived!.times)).toEqual([10000, 20000]);
   expect(Array.from(archived!.values)).toEqual([0.3, 0.4]);
   expect(archivedSeries([source], hass, { ...summary, boundaries: [10, 20], series: {} })).toEqual([]);
+});
+
+it("reduces long Recorder windows and retains extrema, gaps and endpoints", () => {
+  const readings = Array.from({ length: 3600 }, (_, lu) => ({
+    lu,
+    s: lu === 155 ? "unavailable" : lu === 157 ? "999" : lu === 159 ? "-999" : "1",
+  }));
+  const short = downsampleRecorderStates(readings, 15 * 60_000);
+  const long = downsampleRecorderStates(readings, 48 * 3600_000);
+  expect(long.length).toBeLessThan(short.length / 10);
+  expect(long[0]).toBe(readings[0]);
+  expect(long.at(-1)).toBe(readings.at(-1));
+  for (const index of [155, 157, 159]) expect(long).toContain(readings[index]);
 });

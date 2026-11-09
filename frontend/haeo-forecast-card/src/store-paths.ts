@@ -1,3 +1,4 @@
+import { stepArrayIndex } from "./hover";
 import { linearScale, linePath, stepAreaPath, stepPath } from "./geometry";
 import { classifyPowerSeries } from "./power-series-classification";
 import type { ForecastSeries, LaneBounds, PowerDisplayMode } from "./types";
@@ -59,6 +60,62 @@ export function computePowerShapes(
       d: stepAreaPath(series.times, lower, upper, xScale, yScalePower),
     };
   });
+}
+
+export interface PowerDifference {
+  key: string;
+  color: string;
+  direction: "higher" | "lower";
+  path: string;
+}
+
+export function computePowerDifferences(
+  current: ForecastSeries[],
+  comparison: ForecastSeries[],
+  highlighted: ReadonlySet<string>,
+  range: { min: number; max: number },
+  mode: PowerDisplayMode,
+  x: (time: number) => number,
+  y: (power: number) => number
+): PowerDifference[] {
+  const differences: PowerDifference[] = [];
+  for (const [index, series] of comparison.entries()) {
+    if (!highlighted.has(series.key)) continue;
+    const original = current.find((item) => item.key === series.key);
+    if (!original || series.times.length < 2 || original.times.length < 2) continue;
+    const start = Math.max(range.min, series.times[0]!, original.times[0]!);
+    const end = Math.min(range.max, series.times.at(-1)!, original.times.at(-1)!);
+    if (!(start < end)) continue;
+    const base = comparison.slice(0, index).filter((item) => powerSection(item) === powerSection(series));
+    const times = new Set([start, end]);
+    for (const item of [series, original, ...base]) {
+      for (const time of item.times) if (start < time && time < end) times.add(time);
+    }
+    const ordered = [...times].sort((a, b) => a - b);
+    const paths = { higher: "", lower: "" };
+    const valueAt = (item: ForecastSeries, time: number): number => {
+      if (time < item.times[0]! || time >= item.times.at(-1)!) return 0;
+      return powerValueForDisplay(item, item.values[stepArrayIndex(item.times, time)] ?? 0, mode);
+    };
+    for (let i = 0; i < ordered.length - 1; i++) {
+      const at = ordered[i]!;
+      const a = valueAt(original, at);
+      const b = valueAt(series, at);
+      if (Math.abs(a - b) < 1e-6) continue;
+      const stack = base.reduce((sum, item) => sum + valueAt(item, at), 0);
+      const x1 = x(at);
+      const x2 = x(ordered[i + 1]!);
+      const y1 = y(stack + a);
+      const y2 = y(stack + b);
+      const direction = Math.abs(b) > Math.abs(a) ? "higher" : "lower";
+      paths[direction] += "M " + x1 + " " + y1 + " H " + x2 + " V " + y2 + " H " + x1 + " Z ";
+    }
+    for (const direction of ["higher", "lower"] as const) {
+      if (paths[direction])
+        differences.push({ key: series.key, color: series.color, direction, path: paths[direction] });
+    }
+  }
+  return differences;
 }
 
 export function computeHoveredPowerKeys(

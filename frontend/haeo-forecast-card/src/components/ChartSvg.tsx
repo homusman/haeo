@@ -159,6 +159,16 @@ const PlotViewport = observer(function PlotViewport(props: {
           <WindowLayer store={store} comparison={props.comparison} />
           <PowerLayer store={store} paths={paths} />
           <OverlayLayers store={store} paths={paths} />
+          {props.comparison &&
+            store.comparisonPowerDifferences.map((difference, index) => (
+              <path
+                key={difference.key + difference.direction + index}
+                className={"powerDifference " + difference.direction}
+                d={difference.path}
+                fill={difference.color}
+                stroke={difference.color}
+              />
+            ))}
         </g>
         {!props.comparison && <HistoryLayer store={store} />}
         <HoverOverlay store={store} />
@@ -174,6 +184,7 @@ export const ChartSvg = observer(function ChartSvg(props: ChartSvgProps): JSX.El
     <svg
       width={store.width}
       height={store.height}
+      data-comparison={props.comparison ?? false}
       onPointerMove={(event) => props.onPointerMove(event as unknown as PointerEvent)}
       onPointerLeave={props.onPointerLeave}
       onContextMenu={(event) => {

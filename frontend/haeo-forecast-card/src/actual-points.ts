@@ -1,3 +1,4 @@
+import type { RecorderState } from "./plan-view";
 import type { Point } from "./archived-series";
 import type { ForecastCardStore } from "./store";
 import type { ForecastSeries } from "./types";
@@ -44,4 +45,58 @@ export function measuredAt(points: Point[], time: number): number | undefined {
     if (at <= time) return Number.isFinite(value) ? value : undefined;
   }
   return undefined;
+}
+
+/** Keep the first, last, extrema and an unavailable reading in each plot bucket. */
+export function downsampleRecorderStates(states: RecorderState[], windowMs: number): RecorderState[] {
+  const bucketMs = Math.max(1000, windowMs / 240);
+  let bucket = -Infinity;
+  let readings: RecorderState[] = [];
+  const result: RecorderState[] = [];
+  const flush = (): void => {
+    if (!readings.length) return;
+    let min = Infinity,
+      max = -Infinity;
+    let minIndex = 0,
+      maxIndex = 0,
+      gapIndex = -1;
+    for (const [index, reading] of readings.entries()) {
+      const value = reading.s.trim() ? Number(reading.s) : NaN;
+      if (!Number.isFinite(value)) {
+        if (gapIndex < 0) gapIndex = index;
+        continue;
+      }
+      if (value < min) {
+        min = value;
+        minIndex = index;
+      }
+      if (value > max) {
+        max = value;
+        maxIndex = index;
+      }
+    }
+    const recoveryIndex =
+      gapIndex < 0
+        ? -1
+        : readings.findIndex(
+            (reading, index) => index > gapIndex && reading.s.trim() !== "" && Number.isFinite(Number(reading.s))
+          );
+    const indices = new Set([0, minIndex, maxIndex, gapIndex, recoveryIndex, readings.length - 1]);
+    for (const index of [...indices].sort((a, b) => a - b)) {
+      if (index >= 0) result.push(readings[index]!);
+    }
+    readings = [];
+  };
+  for (const state of states) {
+    const time = (state.lu ?? state.lc ?? NaN) * 1000;
+    if (!Number.isFinite(time)) continue;
+    const nextBucket = Math.floor(time / bucketMs);
+    if (bucket !== nextBucket) {
+      flush();
+      bucket = nextBucket;
+    }
+    readings.push(state);
+  }
+  flush();
+  return result;
 }

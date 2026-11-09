@@ -108,7 +108,7 @@ jobs:
           from pathlib import Path
           path = Path("custom_components/haeo_homusman/manifest.json")
           manifest = json.loads(path.read_text())
-          assert manifest["version"] == "0.5.4b13"
+          assert manifest["version"] == "0.5.4b14"
           PY
       - name: Package HACS integration
         run: |
@@ -132,7 +132,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha256sum haeo_homusman.zip > haeo_homusman.zip.sha256
-          gh release create v0.5.4b13 haeo_homusman.zip haeo_homusman.zip.sha256 \
+          gh release create v0.5.4b14 haeo_homusman.zip haeo_homusman.zip.sha256 \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "HAEO Homusman v0.5.4b13" --prerelease --latest=false \
+            --title "HAEO Homusman v0.5.4b14" --prerelease --latest=false \
             --notes-file docs/homusman-plan-preview.md

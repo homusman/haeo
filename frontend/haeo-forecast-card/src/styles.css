@@ -687,3 +687,14 @@ ha-card.forecastCard {
     flex-basis: 5.75rem;
   }
 }
+
+.powerDifference {
+  pointer-events: none;
+  fill-opacity: 0.42;
+  stroke-opacity: 0.9;
+  stroke-width: 1px;
+}
+.powerDifference.lower {
+  fill-opacity: 0.26;
+  stroke-dasharray: 3 2;
+}

@@ -11,8 +11,14 @@ import { normalizeSeries } from "./series";
 import { type WindowBand, windowBands } from "./window-bands";
 import type { HassLike } from "./series";
 import type { CurrentPlanMetadata, PlanDetail, PlanSegment, RecorderState } from "./plan-view";
-import type { LineSvgPath, PowerShape } from "./store-paths";
-import { computeHoveredPowerKeys, computePowerShapes, computePricePaths, computeSocPaths } from "./store-paths";
+import type { LineSvgPath, PowerDifference, PowerShape } from "./store-paths";
+import {
+  computeHoveredPowerKeys,
+  computePowerDifferences,
+  computePowerShapes,
+  computePricePaths,
+  computeSocPaths,
+} from "./store-paths";
 import { buildTooltipRows, type TooltipSectionId } from "./tooltip-helpers";
 import { clampHorizonToOptions, horizonPresetToDuration, type HorizonOption } from "./horizon-config";
 import { displayFormat, type DisplayFormat } from "./locale-format";
@@ -94,6 +100,7 @@ export class ForecastCardStore {
   height = DEFAULT_HEIGHT;
   pointerX: number | null = null;
   pointerY: number | null = null;
+  pointerComparison = false;
   highlightedSeries: string | null = null;
   highlightedSeriesGroupKeys = new Set<string>();
   hoveredLegendElement: string | null = null;
@@ -135,6 +142,7 @@ export class ForecastCardStore {
       priceBounds: computed.struct,
       socBounds: computed.struct,
       tooltipRows: computed.struct,
+      hoveredPowerSeriesKeys: computed.struct,
       format: computed.struct,
       cachedXScale: computed,
     });
@@ -224,7 +232,8 @@ export class ForecastCardStore {
     return Math.max(260, Math.min(520, Math.round(width * 0.52)));
   }
 
-  setPointer(x: number | null, y: number | null): void {
+  setPointer(x: number | null, y: number | null, comparison = false): void {
+    this.pointerComparison = comparison;
     this.pointerX = x;
     this.pointerY = y;
   }
@@ -844,15 +853,65 @@ export class ForecastCardStore {
     if (time === null) {
       return new Set();
     }
+    const segment = this.hoveredPlan;
+    const historic = segment && this.historyDetails[segment.plan.id];
+    const series = this.pointerComparison
+      ? this.comparisonPowerSeries
+      : this.historyReady && time < this.historyClock
+        ? historic
+          ? this.sortPowerSeries(
+              archivedSeries(this.visibleSeries, this.hass, historic).filter(
+                ({ lane, sourceRole }) => lane === "power" && sourceRole !== "limit"
+              )
+            )
+          : []
+        : this.orderedPowerSeries;
+    const active = series.filter((item) => time >= item.times[0]! && time < item.times.at(-1)!);
     return computeHoveredPowerKeys(
-      this.orderedPowerSeries,
-      this.hoverIndices,
+      active,
+      computeHoverIndices(active, time),
       this.powerDisplayMode,
       this.powerBounds,
       this.plotTop,
       this.plotBottom,
       this.pointerY
     );
+  }
+
+  get comparisonPowerSeries(): ForecastSeries[] {
+    return this.sortPowerSeries(
+      this.pinnedComparisonSeries.filter(({ lane, sourceRole }) => lane === "power" && sourceRole !== "limit")
+    );
+  }
+
+  get comparisonPowerDifferences(): PowerDifference[] {
+    const selected = this.hoveredPowerSeriesKeys;
+    const comparison = this.comparisonPowerSeries;
+    if (!selected.size || !comparison.length) return [];
+    const { min, max } = this.xDomain;
+    const compute = (current: ForecastSeries[], start: number, end: number): PowerDifference[] =>
+      computePowerDifferences(
+        current,
+        comparison,
+        selected,
+        { min: start, max: end },
+        this.powerDisplayMode,
+        this.cachedXScale,
+        (value) => this.yScalePower(value)
+      );
+    const differences = compute(
+      this.orderedPowerSeries,
+      this.historyReady ? Math.max(min, this.historyClock) : min,
+      max
+    );
+    for (const segment of this.segments) {
+      const detail = this.historyDetails[segment.plan.id];
+      if (detail && segment.start < max && segment.end > min) {
+        const historic = archivedSeries(this.visibleSeries, this.hass, detail);
+        differences.push(...compute(historic, Math.max(min, segment.start), Math.min(max, segment.end)));
+      }
+    }
+    return differences;
   }
 
   get pricePaths(): LineSvgPath[] {
