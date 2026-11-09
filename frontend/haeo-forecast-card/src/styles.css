@@ -695,6 +695,8 @@ ha-card.forecastCard {
   stroke-width: 1px;
 }
 .powerDifference.lower {
+  fill: var(--error-color, #d32f2f);
+  stroke: var(--error-color, #d32f2f);
   fill-opacity: 0.26;
   stroke-dasharray: 3 2;
 }

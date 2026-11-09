@@ -30,6 +30,7 @@ export interface CurrentPlanMetadata {
 }
 
 export interface PlanDetail extends PlanSummary {
+  generated_at?: string;
   boundaries: number[];
   inputs?: Record<string, Record<string, [number, number][]>>;
   series: Record<string, Record<string, [number, number][]>>;
@@ -248,11 +249,14 @@ export const PlanControls = observer(function PlanControls({
 });
 
 function formatRunAge(milliseconds: number): string {
-  const seconds = Math.max(0, Math.floor(milliseconds / 1000));
-  if (!Number.isFinite(seconds)) return "—";
-  if (seconds < 60) return seconds + "s ago";
-  if (seconds < 3600) return Math.floor(seconds / 60) + "m " + (seconds % 60) + "s ago";
-  return Math.floor(seconds / 3600) + "h " + Math.floor((seconds % 3600) / 60) + "m ago";
+  return Number.isFinite(milliseconds) ? formatDuration(Math.max(0, milliseconds)) + " ago" : "—";
+}
+
+function formatDuration(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1000);
+  if (seconds < 60) return seconds + "s";
+  if (seconds < 3600) return Math.floor(seconds / 60) + "m " + (seconds % 60) + "s";
+  return Math.floor(seconds / 3600) + "h " + Math.floor((seconds % 3600) / 60) + "m";
 }
 
 export const HistoricPlanInfo = observer(function HistoricPlanInfo({
@@ -272,12 +276,21 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
   if (!segment) {
     const candidate = store.candidatePreview;
     const current = store.currentPlanMetadata;
+    const candidateOffset =
+      Date.parse(candidate?.generated_at ?? "") - Date.parse(current?.accepted_at ?? "");
     return (
       <aside className="historicPlanInfo">
         <strong>{candidate ? "Candidate" : "Current plan"}</strong>
         {candidate ? (
           <>
             <div>Candidate cost {candidate.decision.candidate_cost?.toFixed(3) ?? "—"}</div>
+            {Number.isFinite(candidateOffset) && (
+              <div>
+                {candidateOffset === 0
+                  ? "Generated at the current plan’s acceptance time"
+                  : `${formatDuration(Math.abs(candidateOffset))} ${candidateOffset > 0 ? "after" : "before"} current plan acceptance`}
+              </div>
+            )}
             <div>
               {candidate.decision.accepted ? "Accepted" : "Not accepted"} ·{" "}
               {candidate.decision.reason.replaceAll("_", " ")}

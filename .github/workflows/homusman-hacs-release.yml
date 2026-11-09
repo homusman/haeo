@@ -121,10 +121,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          sha256sum haeo_homusman.zip > haeo_homusman.zip.sha256
+          notes=(--generate-notes)
+          if [[ "${{ steps.version.outputs.version }}" == "0.6.0" ]]; then
+            notes=(--notes-file docs/homusman-v0.6.0.md)
+          fi
           gh release create "v${{ steps.version.outputs.version }}" \
-            haeo_homusman.zip --repo "${{ github.repository }}" \
+            haeo_homusman.zip haeo_homusman.zip.sha256 --repo "${{ github.repository }}" \
             --title "HAEO - Homusman fork v${{ steps.version.outputs.version }}" \
-            --generate-notes --latest
+            "${notes[@]}" --latest
 
       - name: Publish plan acceptance preview
         if: github.ref_name == 'plan-acceptance-preview'
