@@ -36,6 +36,7 @@ def test_initialize_then_optimize(enabled: bool) -> None:
         )
         network = Mock(n_periods=1, relaxations=(), action_snapshot=Mock(return_value={}))
         coordinator._network = network
+        coordinator._participant_configs = {}
         coordinator._stale_elements = set()
         coordinator._accepted = None
         coordinator.plan_history = Mock(record=AsyncMock())
