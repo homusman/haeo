@@ -192,8 +192,8 @@ describe("haeo-homusman-forecast-card smoke", () => {
 
       const chartContainer = element.shadowRoot?.querySelector(".chartContainer");
       expect(chartContainer).toBeTruthy();
-      expect(element.getCardSize()).toBe(14);
-      expect(element.getGridOptions()).toEqual({ rows: 11, min_rows: 10, columns: "full" });
+      expect(element.getCardSize()).toBe(21);
+      expect(element.getGridOptions()).toEqual({ rows: 17, min_rows: 17, columns: "full" });
 
       const callback = observerCallbacks[0];
       expect(callback).toBeTruthy();
@@ -209,7 +209,7 @@ describe("haeo-homusman-forecast-card smoke", () => {
         ],
         {} as ResizeObserver
       );
-      expect(element.getCardSize()).toBe(14);
+      expect(element.getCardSize()).toBe(21);
       callback(
         [
           {
@@ -219,7 +219,7 @@ describe("haeo-homusman-forecast-card smoke", () => {
         ],
         {} as ResizeObserver
       );
-      expect(element.getCardSize()).toBe(14);
+      expect(element.getCardSize()).toBe(21);
     } finally {
       element.remove();
       globalThis.ResizeObserver = OriginalResizeObserver;
@@ -242,7 +242,7 @@ describe("haeo-homusman-forecast-card smoke", () => {
     document.body.appendChild(element);
     await waitForController();
 
-    expect(element.getCardSize()).toBe(14);
+    expect(element.getCardSize()).toBe(21);
     element.remove();
   });
 
