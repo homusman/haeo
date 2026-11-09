@@ -859,8 +859,8 @@ export class ForecastCardStore {
 
   // --- Computed: tooltip ---
 
-  private powerValueForDisplayBound(series: ForecastSeries, value: number): number {
-    return powerValueForDisplay(series, value, this.powerDisplayMode);
+  private tooltipValueForDisplay(series: ForecastSeries, value: number): number {
+    return series.lane === "power" ? powerValueForDisplay(series, value, this.powerDisplayMode) : value;
   }
 
   get tooltipRows(): Array<{
@@ -879,7 +879,7 @@ export class ForecastCardStore {
       this.panelIndices,
       this.normalizedSeries,
       computeHoverIndices(this.normalizedSeries, this.panelTimeMs),
-      (series, value) => this.powerValueForDisplayBound(series, value)
+      (series, value) => this.tooltipValueForDisplay(series, value)
     );
     if (!this.pinnedPlanId && !this.candidatePreview && !this.pastHours) return rows;
     const current = this.visibleSeries;
@@ -889,7 +889,7 @@ export class ForecastCardStore {
       if (!series || time < series.times[0]! || time > series.times.at(-1)!) return undefined;
       const idx = computeHoverIndices([series], time).get(series.key);
       const value = idx === undefined ? undefined : series.values[idx];
-      return value === undefined ? undefined : this.powerValueForDisplayBound(series, value);
+      return value === undefined ? undefined : this.tooltipValueForDisplay(series, value);
     };
     return rows.map((row) => ({
       ...row,
@@ -900,7 +900,7 @@ export class ForecastCardStore {
           const series = this.visibleSeries.find((item) => item.key === row.key);
           if (!series) return undefined;
           const value = measuredAt(actualPoints(this, series), time);
-          return value === undefined ? undefined : this.powerValueForDisplayBound(series, value);
+          return value === undefined ? undefined : this.tooltipValueForDisplay(series, value);
         })(),
       },
     }));

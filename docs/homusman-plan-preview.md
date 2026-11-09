@@ -1,6 +1,8 @@
 # HAEO Homusman plan acceptance preview
 
-This HACS prerelease is for the separate `haeo_homusman` hub in shadow use. Keep the dispatcher connected to the vanilla HAEO hub. Install by selecting `v0.5.4b11` explicitly in HACS, restart Core and reload the Homusman Lovelace card.
+This update bounds and scrolls plan metadata, preserves SoC and price values in the cursor panel, and places plot titles inside the lower-left corners.
+
+This HACS prerelease is for the separate `haeo_homusman` hub in shadow use. Keep the dispatcher connected to the vanilla HAEO hub. Install by selecting `v0.5.4b12` explicitly in HACS, restart Core and reload the Homusman Lovelace card.
 
 - This update fixes a setup error in the coordinator and gives the fork?s cards distinct names in the card picker.
 - The earlier battery-power deviation penalty has been removed. Its saved settings have no effect.

@@ -634,3 +634,33 @@ it("switches the selected pane directly from history to candidate", async () => 
   expect(store.pinnedPlanId).toBeNull();
   expect(store.candidatePreview?.id).toBe("candidate");
 });
+
+it("preserves SoC values in opposed mode when comparing plans", () => {
+  const store = new ForecastCardStore();
+  store.setConfig(testConfig);
+  store.setHass(loadScenarioHassState("scenario2"));
+  const soc = store.socSeries.find((series) => series.values[0]! > 0)!;
+  const element = String(store.hass?.states[soc.entityId]?.attributes["element_name"]);
+  const at = soc.times[0]! / 1000;
+  store.setHistoryClock(at * 1000);
+  store.setCandidatePreview({
+    id: "candidate",
+    accepted_at: "",
+    ended_at: null,
+    ends: at + 60,
+    decision: { reason: "accepted", benefit: null },
+    boundaries: [at, at + 60],
+    series: {
+      [element]: {
+        [soc.outputName]: [
+          [at, 48],
+          [at + 60, 50],
+        ],
+      },
+    },
+  });
+  expect(store.powerDisplayMode).toBe("opposed");
+  const row = store.tooltipRows.find(({ key }) => key === soc.key);
+  expect(row?.comparison?.current).toBe(soc.values[0]);
+  expect(row?.comparison?.historical).toBe(48);
+});

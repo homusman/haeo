@@ -531,7 +531,11 @@ ha-card {
   width: 5rem;
 }
 .historicPlanInfo {
-  flex: 0 0 auto;
+  box-sizing: border-box;
+  flex: 0 0 8.5rem;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0.35rem 0.75rem;
   padding: 0.35rem 0.55rem;
   border: 1px solid var(--haeo-divider);
@@ -661,7 +665,7 @@ ha-card.forecastCard {
   pointer-events: none;
 }
 .chartLabel {
-  right: 0.6rem;
+  top: auto;
   font-weight: 600;
 }
 .planHoverLabel {
@@ -676,4 +680,10 @@ ha-card.forecastCard {
   color: var(--haeo-subtext);
   font-size: 0.85rem;
   text-align: center;
+}
+
+@container (max-width: 768px) {
+  .historicPlanInfo {
+    flex-basis: 5.75rem;
+  }
 }

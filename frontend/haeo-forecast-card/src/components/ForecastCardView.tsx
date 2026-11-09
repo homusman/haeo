@@ -169,6 +169,7 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
   const selected = props.store.pinnedPlanId || props.store.candidatePreview;
   const hovered = props.store.hoveredPlan;
   const hoverX = props.store.hoverX;
+  const plotLabelPosition = { left: props.store.margins.left + 8, bottom: props.store.margins.bottom + 6 };
   const emptyReason = forecastEmptyReason(props.store.hass, props.store.config, props.store.hasData);
 
   if (emptyReason === "loading") {
@@ -225,7 +226,9 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
       </div>
       <div className={["comparisonLayout", "isPinned", "hasInfo"].filter(Boolean).join(" ")}>
         <div className="chartContainer primaryChart">
-          <span className="chartLabel">Current plan</span>
+          <span className="chartLabel" style={plotLabelPosition}>
+            Current plan
+          </span>
           {props.store.isHoverInPlot && hoverX !== null && (
             <span className="planHoverLabel" style={{ left: "clamp(0px, " + hoverX + "px, calc(100% - 9rem))" }}>
               {hovered
@@ -254,7 +257,9 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
             props.store.clearComparison();
           }}
         >
-          <span className="chartLabel">{props.store.comparisonLabel}</span>
+          <span className="chartLabel" style={plotLabelPosition}>
+            {props.store.comparisonLabel}
+          </span>
           {selected ? (
             <ChartSvg
               store={props.store}
