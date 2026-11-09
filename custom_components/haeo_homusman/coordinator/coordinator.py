@@ -452,14 +452,6 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         This is called from async_setup_entry after all input entities are loaded.
         """
         loaded_configs = self._load_from_input_stores()
-        periods_seconds = tuple(horizon_manager.periods_seconds)
-        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
-        confidence = advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False)
-        gate = advanced.get(CONF_PLAN_GATE_ENABLED, False)
-        threshold = float(advanced.get(CONF_PLAN_ACCEPTANCE_THRESHOLD, THRESHOLD))
-        if confidence:
-            loaded_configs = adjust_grid_prices(loaded_configs, forecast_timestamps)
-
         _LOGGER.debug("Initializing network with %d participants", len(loaded_configs))
 
         network = self._build_network(loaded_configs)
@@ -792,20 +784,28 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._check_inputs(context)
         loaded_configs = self._load_from_input_stores()
 
+        periods_seconds = tuple(horizon_manager.periods_seconds)
+        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
+        confidence = advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False)
+        gate = advanced.get(CONF_PLAN_GATE_ENABLED, False)
+        threshold = float(advanced.get(CONF_PLAN_ACCEPTANCE_THRESHOLD, THRESHOLD))
+        if confidence:
+            loaded_configs = adjust_grid_prices(loaded_configs, forecast_timestamps)
+
         _LOGGER.debug("Running optimization with %d participants", len(loaded_configs))
 
         # Bring the network to the horizon the inputs were loaded for, and apply the
         # inputs that changed, before the solve is handed to the executor, so the
         # network is never mutated while it is being solved
         network = self.network
-        if network.n_periods == len(horizon_manager.periods_seconds):
-            network.update_periods(periods_in_hours(horizon_manager.periods_seconds))
+        if network.n_periods == len(periods_seconds):
+            network.update_periods(periods_in_hours(periods_seconds))
             for element_name in loaded_configs if confidence else self._stale_elements:
                 self._element_updaters[element_name](loaded_configs[element_name])
         else:
             # An entity horizon can change how many periods it has, and the network's
             # variables are sized for the count it was built with
-            _LOGGER.debug("Rebuilding the network for %d periods", len(horizon_manager.periods_seconds))
+            _LOGGER.debug("Rebuilding the network for %d periods", len(periods_seconds))
             network = self._build_network(loaded_configs)
         self._stale_elements.clear()
 

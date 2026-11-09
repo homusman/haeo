@@ -41,8 +41,13 @@ jobs:
           PY
       - name: Run economic regression tests
         run: |
-          python -m pip install "numpy>=2.3.2" "highspy>=1.15.1" "typing-extensions>=4" "pytest>=9.0.0"
+          python -m pip install "numpy>=2.3.2" "highspy>=1.15.1" "typing-extensions>=4" "pytest>=9.0.0" "ruff>=0.14.0"
+          python -m ruff check --select F821 custom_components/haeo_homusman
           python -m pytest -q --noconftest -c /dev/null tests/test_homusman_stability.py
+      - name: Test coordinator startup against Home Assistant
+        run: |
+          python -m pip install "homeassistant==2026.1.1"
+          python -m pytest -q --noconftest -c /dev/null tests/test_homusman_startup.py
       - name: Build standalone Lovelace card assets
         run: |
           npm --prefix frontend/haeo-forecast-card ci
@@ -56,6 +61,8 @@ jobs:
               source = (directory / name).read_text()
               assert "haeo-homusman" in source, name
           main = (directory / "haeo-homusman-forecast-card.min.js").read_text()
+          assert "HAEO Homusman Forecast Card" in main
+          assert "HAEO Homusman Network Topology Card" in (directory / "haeo-homusman-topology-card.min.js").read_text()
           assert "haeo_homusman" in main, "Fork card editor must target fork integration domain"
           assert "integration:`haeo`" not in main, "Upstream HAEO selector leaked into compiled card"
           assert not Path("custom_components/haeo").exists()
@@ -100,7 +107,7 @@ jobs:
           from pathlib import Path
           path = Path("custom_components/haeo_homusman/manifest.json")
           manifest = json.loads(path.read_text())
-          assert manifest["version"] == "0.5.4b1"
+          assert manifest["version"] == "0.5.4b2"
           PY
       - name: Package HACS integration
         run: |
@@ -124,7 +131,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha256sum haeo_homusman.zip > haeo_homusman.zip.sha256
-          gh release create v0.5.4b1 haeo_homusman.zip haeo_homusman.zip.sha256 \
+          gh release create v0.5.4b2 haeo_homusman.zip haeo_homusman.zip.sha256 \
             --repo "${{ github.repository }}" --target "${{ github.sha }}" \
-            --title "HAEO Homusman v0.5.4b1" --prerelease --latest=false \
+            --title "HAEO Homusman v0.5.4b2" --prerelease --latest=false \
             --notes-file docs/homusman-plan-preview.md
