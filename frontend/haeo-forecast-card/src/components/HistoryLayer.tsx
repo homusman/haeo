@@ -1,38 +1,12 @@
 import type { JSX } from "preact";
 import { linePath, stepPath } from "../geometry";
 import { observer } from "../mobx-observer";
-import type { PlanDetail } from "../plan-view";
+import { archivedSeries, clipPlanPoints, type Point } from "../archived-series";
+import { OverlayLineLayer } from "./OverlayLineLayer";
+import { PowerStackLayer } from "./PowerStackLayer";
 import { powerValueForDisplay } from "../power-display";
 import type { ForecastCardStore } from "../store";
 import type { ForecastSeries } from "../types";
-
-type Point = [number, number];
-
-function planPoints(store: ForecastCardStore, plan: PlanDetail, series: ForecastSeries): Point[] {
-  const name = store.hass?.states[series.entityId]?.attributes["element_name"];
-  const points = typeof name === "string" ? plan.series[name]?.[series.outputName] : undefined;
-  if (!points?.length) return [];
-  const result: Point[] = points.map(([time, value]) => [time * 1000, Number(value)]);
-  const last = result.at(-1)!;
-  const end = plan.boundaries.at(-1)! * 1000;
-  if (series.drawType === "step" && last[0] < end) result.push([end, last[1]]);
-  return result;
-}
-
-export function clipPlanPoints(points: Point[], start: number, end: number, linear: boolean): Point[] {
-  if (points.length < 2 || start >= end) return [];
-  const lower = Math.max(start, points[0]![0]);
-  const upper = Math.min(end, points.at(-1)![0]);
-  if (lower >= upper) return [];
-  function valueAt(time: number): number {
-    const next = points.findIndex(([at]) => at > time);
-    if (next < 0) return points.at(-1)![1];
-    const left = points[next - 1]!;
-    const right = points[next]!;
-    return linear ? left[1] + ((right[1] - left[1]) * (time - left[0])) / (right[0] - left[0]) : left[1];
-  }
-  return [[lower, valueAt(lower)], ...points.filter(([time]) => lower < time && time < upper), [upper, valueAt(upper)]];
-}
 
 function path(store: ForecastCardStore, series: ForecastSeries, points: Point[], actual = false): string {
   const draw = series.drawType === "step" ? stepPath : linePath;
@@ -82,7 +56,7 @@ export const HistoryLayer = observer(function HistoryLayer({
 }: {
   store: ForecastCardStore;
 }): JSX.Element | null {
-  if (!store.pastHours && !store.candidatePreview) return null;
+  if (!store.pastHours) return null;
   const { min, max } = store.xDomain;
   const selected = store.hoveredPlan;
   const comparison = selected ? store.historyDetails[selected.plan.id] : undefined;
@@ -91,53 +65,44 @@ export const HistoryLayer = observer(function HistoryLayer({
     <g className="historyLayer" pointer-events="none">
       {store.segments.map(({ plan, start, end }) => {
         const detail = store.historyDetails[plan.id];
-        return (
-          detail &&
-          visible.map((series) => {
-            const points = planPoints(store, detail, series);
-            const isPreview = comparison?.id === plan.id;
-            const ranges =
-              comparison && !isPreview
-                ? [
-                    [start, Math.min(end, comparison.boundaries[0]! * 1000)],
-                    [Math.max(start, comparison.boundaries.at(-1)! * 1000), end],
-                  ]
-                : [[start, end]];
-            const parts = isPreview
-              ? [points]
-              : ranges.map(([from, to]) =>
-                  clipPlanPoints(points, Math.max(min, from!), Math.min(max, to!), series.drawType === "line")
-                );
-            return parts.map((part, index) => (
-              <path
-                key={plan.id + series.key + index}
-                d={path(store, series, part)}
-                fill="none"
-                stroke={series.color}
-                stroke-width={1.5}
-                stroke-dasharray={isPreview ? "5 4" : undefined}
-                opacity={isPreview ? 0.75 : 0.6}
-              />
-            ));
-          })
-        );
-      })}
-      {!selected &&
-        store.candidatePreview &&
-        visible.map((series) => {
-          const points = planPoints(store, store.candidatePreview!, series);
-          const clipped = clipPlanPoints(points, store.historyClock, max, series.drawType === "line");
+        if (!detail) return null;
+        const isPreview = comparison?.id === plan.id;
+        const ranges = isPreview
+          ? [[min, store.candidatePreview ? Math.min(max, store.historyClock) : max]]
+          : comparison
+            ? [
+                [start, Math.min(end, comparison.boundaries[0]! * 1000)],
+                [Math.max(start, comparison.boundaries.at(-1)! * 1000), end],
+              ]
+            : [[start, end]];
+        return ranges.map(([from, to], index) => {
+          const series = archivedSeries(visible, store.hass, detail, Math.max(min, from!), Math.min(max, to!));
+          if (!series.length) return null;
+          const shapes = store.pathsForSeries(series);
           return (
-            <path
-              key={"candidate-" + series.key}
-              d={path(store, series, clipped)}
-              fill="none"
-              stroke={series.color}
-              stroke-width={2}
-              stroke-dasharray="5 4"
-            />
+            <g key={plan.id + index} opacity={isPreview ? 0.55 : undefined}>
+              <PowerStackLayer
+                shapes={shapes.powerShapes}
+                highlightedSeries={store.highlightedSeries}
+                hoveredSeriesKeys={new Set()}
+                focusedSeriesKeys={store.focusedLegendSeriesKeys}
+              />
+              <OverlayLineLayer
+                paths={shapes.pricePaths}
+                highlightedSeries={store.highlightedSeries}
+                focusedSeriesKeys={store.focusedLegendSeriesKeys}
+                cssClass="priceLine"
+              />
+              <OverlayLineLayer
+                paths={shapes.socPaths}
+                highlightedSeries={store.highlightedSeries}
+                focusedSeriesKeys={store.focusedLegendSeriesKeys}
+                cssClass="socLine"
+              />
+            </g>
           );
-        })}
+        });
+      })}
       {store.segments.length > 0 &&
         visible.map((series) => {
           const points = actualPoints(store, series);
@@ -152,6 +117,7 @@ export const HistoryLayer = observer(function HistoryLayer({
           );
         })}
       {selected &&
+        !store.candidatePreview &&
         visible
           .filter((series) => store.actualSources[series.entityId])
           .map((series) => {

@@ -1,3 +1,4 @@
+import { archivedSeries } from "./archived-series";
 import { discoverActualSources } from "./actual-sources";
 import { computed, makeAutoObservable, observable } from "mobx";
 
@@ -147,6 +148,8 @@ export class ForecastCardStore {
 
   setCandidatePreview(plan: PlanDetail | null): void {
     this.candidatePreview = plan;
+    this.seriesDataRevision += 1;
+    this.recomputePowerBounds();
   }
 
   setSegments(segments: PlanSegment[]): void {
@@ -339,12 +342,21 @@ export class ForecastCardStore {
     return this.normalizedSeries.filter((s) => VISIBLE_LANES.has(s.lane) && !this.hiddenSeriesKeys.has(s.key));
   }
 
+  get plottedSeries(): ForecastSeries[] {
+    const candidate = this.candidatePreview;
+    return candidate ? archivedSeries(this.visibleSeries, this.hass, candidate) : this.visibleSeries;
+  }
+
   get powerSeries(): ForecastSeries[] {
-    return this.visibleSeries.filter((s) => s.lane === "power" && s.sourceRole !== "limit");
+    return this.plottedSeries.filter((s) => s.lane === "power" && s.sourceRole !== "limit");
   }
 
   get orderedPowerSeries(): ForecastSeries[] {
-    return [...this.powerSeries].sort((a, b) => {
+    return this.sortPowerSeries(this.powerSeries);
+  }
+
+  private sortPowerSeries(series: ForecastSeries[]): ForecastSeries[] {
+    return [...series].sort((a, b) => {
       // Primary sort: optimizer priority from the backend determines stack order.
       const aPriority = a.priority ?? Number.POSITIVE_INFINITY;
       const bPriority = b.priority ?? Number.POSITIVE_INFINITY;
@@ -354,11 +366,11 @@ export class ForecastCardStore {
   }
 
   get priceSeries(): ForecastSeries[] {
-    return this.visibleSeries.filter((s) => s.lane === "price");
+    return this.plottedSeries.filter((s) => s.lane === "price");
   }
 
   get windowSeries(): ForecastSeries[] {
-    return this.visibleSeries.filter((s) => s.lane === "window");
+    return this.plottedSeries.filter((s) => s.lane === "window");
   }
 
   get windowBands(): WindowBand[] {
@@ -366,7 +378,7 @@ export class ForecastCardStore {
   }
 
   get socSeries(): ForecastSeries[] {
-    return this.visibleSeries.filter((s) => s.lane === "soc");
+    return this.plottedSeries.filter((s) => s.lane === "soc");
   }
 
   get hasData(): boolean {
@@ -450,6 +462,16 @@ export class ForecastCardStore {
     };
   }
 
+  get pastOptions(): number[] {
+    const limit = this.historyLimitHours;
+    return [
+      0,
+      ...BASE_HORIZON_OPTIONS_MS.map((duration) => duration / HOUR_MS).filter((hours) => hours < limit),
+      ...[24, 48, 72, 96, 120, 144].filter((hours) => hours < limit),
+      limit,
+    ];
+  }
+
   get historyLimitHours(): number {
     const domain = this.fullXDomain;
     return Math.max(1, Math.min(168, Math.ceil((domain.max - domain.min) / HOUR_MS)));
@@ -467,22 +489,12 @@ export class ForecastCardStore {
     const width = this.width - this.margins.left - this.margins.right;
     const ratio = (this.pointerX - this.margins.left) / width;
     if (ratio < 0 || ratio > 1) return null;
-    const domain = this.selectedXDomain;
+    const domain = this.xDomain;
     const time = domain.min + ratio * (domain.max - domain.min);
     return this.segments.find((segment) => segment.start <= time && time < segment.end) ?? null;
   }
 
   get xDomain(): Domain {
-    const plan = this.hoveredPlan;
-    if (plan) {
-      const domain = this.selectedXDomain;
-      const first = this.historyDetails[plan.plan.id]?.boundaries[0];
-      return {
-        ...domain,
-        min: first === undefined ? domain.min : Math.min(domain.min, first * 1000),
-        max: Math.max(domain.max, plan.plan.ends * 1000),
-      };
-    }
     const animation = this.horizonAnimation;
     if (animation === null) {
       return this.selectedXDomain;
@@ -619,15 +631,15 @@ export class ForecastCardStore {
     if (time === null) {
       return new Map();
     }
-    return computeHoverIndices(this.visibleSeries, time);
+    return computeHoverIndices(this.plottedSeries, time);
   }
 
   get panelIndices(): Map<string, number> {
-    return computeHoverIndices(this.visibleSeries, this.panelTimeMs);
+    return computeHoverIndices(this.plottedSeries, this.panelTimeMs);
   }
 
   get sharedTimeline(): Float64Array | null {
-    return sharedTimeline(this.visibleSeries);
+    return sharedTimeline(this.plottedSeries);
   }
 
   // --- Computed: SVG paths ---
@@ -654,10 +666,17 @@ export class ForecastCardStore {
     if (this.plotPathsSnapshot !== null && this.plotPathsSnapshotKey === key) {
       return this.plotPathsSnapshot;
     }
+    const snapshot = this.pathsForSeries(this.plottedSeries);
+    this.plotPathsSnapshotKey = key;
+    this.plotPathsSnapshot = snapshot;
+    return snapshot;
+  }
+
+  pathsForSeries(series: ForecastSeries[]): PlotPaths {
     const xScale = this.cachedXScale;
-    const snapshot: PlotPaths = {
+    return {
       powerShapes: computePowerShapes(
-        this.orderedPowerSeries,
+        this.sortPowerSeries(series.filter((item) => item.lane === "power" && item.sourceRole !== "limit")),
         this.powerBounds,
         this.powerDisplayMode,
         this.plotTop,
@@ -665,7 +684,7 @@ export class ForecastCardStore {
         xScale
       ),
       pricePaths: computePricePaths(
-        this.priceSeries,
+        series.filter((item) => item.lane === "price"),
         this.powerBounds,
         this.priceBounds,
         this.plotTop,
@@ -673,7 +692,7 @@ export class ForecastCardStore {
         xScale
       ),
       socPaths: computeSocPaths(
-        this.socSeries,
+        series.filter((item) => item.lane === "soc"),
         this.powerBounds,
         this.socBounds,
         this.plotTop,
@@ -681,9 +700,6 @@ export class ForecastCardStore {
         xScale
       ),
     };
-    this.plotPathsSnapshotKey = key;
-    this.plotPathsSnapshot = snapshot;
-    return snapshot;
   }
 
   get powerShapes(): PowerShape[] {
@@ -734,7 +750,7 @@ export class ForecastCardStore {
     lane: TooltipSectionId;
   }> {
     return buildTooltipRows(
-      this.visibleSeries,
+      this.plottedSeries,
       this.panelIndices,
       this.normalizedSeries,
       computeHoverIndices(this.normalizedSeries, this.panelTimeMs),

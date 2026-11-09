@@ -468,3 +468,64 @@ describe("ForecastCardStore", () => {
     expect(elementSeries.every((s) => store.visibleSeries.some((v) => v.key === s.key))).toBe(true);
   });
 });
+
+it("keeps the selected future horizon fixed while hovering an older plan", () => {
+  const store = new ForecastCardStore();
+  store.setConfig(testConfig);
+  store.setHass(loadScenarioHassState("scenario2"));
+  const now = store.fullXDomain.min;
+  store.setHistoryClock(now);
+  store.setPastHours(1);
+  store.setHorizon(15 * 60_000);
+  store.horizonAnimation = null;
+  const end = now + 15 * 60_000;
+  store.setSegments([
+    {
+      plan: {
+        id: "old",
+        accepted_at: new Date(now - 3600_000).toISOString(),
+        ended_at: null,
+        ends: (now + 48 * 3600_000) / 1000,
+        decision: { reason: "accepted", benefit: 0.1 },
+      },
+      start: now - 3600_000,
+      end: now,
+      index: -1,
+      previousIndex: -2,
+    },
+  ]);
+  store.setPointer(store.margins.left + 10, store.plotTop + 10);
+  expect(store.hoveredPlan?.plan.id).toBe("old");
+  expect(store.xDomain.max).toBe(end);
+});
+
+it("replaces current forecast series with candidate data and restores current on exit", () => {
+  const store = new ForecastCardStore();
+  store.setConfig(testConfig);
+  store.setHass(loadScenarioHassState("scenario2"));
+  const current = store.powerSeries[0]!;
+  const name = String(store.hass?.states[current.entityId]?.attributes["element_name"]);
+  const start = current.times[0]! / 1000;
+  const end = current.times[1]! / 1000;
+  store.setCandidatePreview({
+    id: "candidate",
+    accepted_at: "",
+    ended_at: null,
+    ends: end,
+    decision: { reason: "same_action", benefit: 0 },
+    boundaries: [start, end],
+    series: {
+      [name]: {
+        [current.outputName]: [
+          [start, 25],
+          [end, 25],
+        ],
+      },
+    },
+  });
+  expect(store.powerSeries).toHaveLength(1);
+  expect(store.powerSeries[0]?.values[0]).toBe(25);
+  expect(store.powerShapes[0]?.d).toBeTruthy();
+  store.setCandidatePreview(null);
+  expect(store.powerSeries[0]).toBe(current);
+});

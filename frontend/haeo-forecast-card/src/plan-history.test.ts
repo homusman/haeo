@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clipPlanPoints } from "./components/HistoryLayer";
+import { clipPlanPoints } from "./archived-series";
 import { historicSegments, type PlanSummary } from "./plan-view";
 
 const plan = (seconds: number, reason = "accepted", ended?: number): PlanSummary => ({

@@ -24,6 +24,7 @@ export interface PlanSegment {
   start: number;
   end: number;
   index: number;
+  previousIndex: number | null;
 }
 
 export interface RecorderState {
@@ -50,7 +51,16 @@ export function historicSegments(plans: PlanSummary[], now: number): PlanSegment
     );
     return plan.decision.reason === "gate_disabled" || !(start < end)
       ? []
-      : [{ plan, start, end, index: index - ordered.length + 1 }];
+      : [
+          {
+            plan,
+            start,
+            end,
+            index: index - ordered.length + 1,
+            previousIndex:
+              index > 0 && ordered[index - 1]?.decision.reason !== "gate_disabled" ? index - ordered.length : null,
+          },
+        ];
   });
 }
 
@@ -69,7 +79,6 @@ export const PlanControls = observer(function PlanControls({
   const enabled = !!store.hass?.callWS && !!hub;
   const past = store.pastHours;
   const measurements = store.actualSources;
-  const horizon = store.historyLimitHours;
 
   useEffect(() => {
     if (!enabled || busy) return;
@@ -194,20 +203,10 @@ export const PlanControls = observer(function PlanControls({
   if (!enabled) return null;
   return (
     <div className="planControls">
-      <label>
-        Past {past}h{" "}
-        <input
-          aria-label="Historic hours"
-          type="range"
-          min={0}
-          max={horizon}
-          value={past}
-          onChange={(event) => store.setPastHours(Number(event.currentTarget.value))}
-        />
-      </label>{" "}
       <button type="button" aria-pressed={store.candidatePreview !== null} onClick={() => void previewCandidate()}>
-        {store.candidatePreview ? "Hide candidate preview" : "Preview candidate"}
+        {store.candidatePreview ? "Show current plan" : "Show candidate plan"}
       </button>{" "}
+      {store.candidatePreview && <strong>Candidate view</strong>}{" "}
       {archive && (
         <span>
           {archive.plans} saved · {(archive.bytes / 1024).toFixed(1)} KiB{" "}
@@ -234,15 +233,18 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
 }): JSX.Element | null {
   const segment = store.hoveredPlan;
   if (!segment) return null;
-  const { plan, index, start, end } = segment;
+  const { plan, index, previousIndex, start, end } = segment;
   return (
     <aside className="tooltip historicPlanInfo">
       <strong>Plan {index === 0 ? "latest" : index}</strong>
       <div>{new Date(start).toLocaleString()}</div>
       <div>In action {Math.round((end - start) / 60_000)} min</div>
       <div>{plan.decision.reason.replaceAll("_", " ")}</div>
-      {plan.decision.benefit != null && <div>Modeled benefit {plan.decision.benefit.toFixed(3)}</div>}
-      <div>Dashed lines show the original forecast.</div>
+      <div>
+        Benefit vs {previousIndex === null ? "previous plan" : "plan " + previousIndex}{" "}
+        {plan.decision.benefit == null ? "unavailable" : plan.decision.benefit.toFixed(3)}
+      </div>
+      <div>Shaded comparison shows the original forecast.</div>
     </aside>
   );
 });

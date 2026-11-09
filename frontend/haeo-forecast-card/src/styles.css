@@ -509,3 +509,8 @@ ha-card {
   fill: currentColor;
   opacity: 0.85;
 }
+
+.horizonSelectors {
+  display: grid;
+  gap: 0.2rem;
+}

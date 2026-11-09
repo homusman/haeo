@@ -1,11 +1,12 @@
 # HAEO Homusman plan acceptance preview
 
-This HACS prerelease is for the separate `haeo_homusman` hub in shadow use. Keep the dispatcher connected to the vanilla HAEO hub. Install by selecting `v0.5.4b4` explicitly in HACS, restart Core and reload the Homusman Lovelace card.
+This HACS prerelease is for the separate `haeo_homusman` hub in shadow use. Keep the dispatcher connected to the vanilla HAEO hub. Install by selecting `v0.5.4b5` explicitly in HACS, restart Core and reload the Homusman Lovelace card.
 
 - This update fixes a setup error in the coordinator and gives the fork?s cards distinct names in the card picker.
 - The earlier battery-power deviation penalty has been removed. Its saved settings have no effect.
 - Under the Homusman hub's advanced options, enable the plan acceptance gate to compare against a strict, same-input LP solve that holds modeled first-interval grid and battery net power. The default threshold is 0.02 in the model's currency, and the same-action deadband is 0.1 kW. The gate and tariff weighting both default off.
 - Separate Advanced settings enable tariff time weighting and spike suppression. Tune the midpoint, width, floor, baseline time constant, spike scale and suppression strength there. The first interval retains its original tariff. Both features default off for new hubs. The modeled benefit uses the objective selected for the current solve.
+- The Past slider sits below the future slider with nonlinear steps. Hover respects the selected range. Historical and candidate power plans use the same filled renderer and display mode as the current plan. The candidate view replaces the current forecast on the right of now.
 - The forecast card shows accepted outputs by default. An administrator can use the Past slider to show the gated plans that were followed. Hover a historical segment to compare its original forecast with the current forecast and any configured measurements. The archive is per hub, local and bounded by size and time. The next successful solve after restart bootstraps a fresh active plan. Archived plans are available for review.
 
 Ungated optimizations stay live but no longer write forecast snapshots to the archive. The card shows the stored count and actual archive file size. Its Purge plan archive button removes saved plans for this hub and leaves the live plan and Recorder history alone. Existing archive data is retained until it ages out or an administrator purges it.

@@ -48,24 +48,45 @@ const CardTitle = observer(function CardTitle(props: { store: ForecastCardStore 
     <div className="cardHeader">
       <div className="title">{props.store.config.title ?? t(props.store.locale, "card.title.default")}</div>
       <div className="headerControls">
-        <div
-          className="horizonSelector"
-          title={t(props.store.locale, "header.horizon", { hours: selectedHorizonLabel })}
-        >
-          <span className="horizonValue">{selectedHorizonLabel}</span>
-          <input
-            className="horizonSlider"
-            type="range"
-            min={0}
-            max={props.store.horizonOptions.length - 1}
-            step={1}
-            value={selectedHorizonIndex}
-            aria-label={t(props.store.locale, "header.horizon", { hours: selectedHorizonLabel })}
-            onInput={(event) => {
-              const index = Number(event.currentTarget.value);
-              props.store.setHorizon(props.store.horizonOptions[index] ?? null);
-            }}
-          />
+        <div className="horizonSelectors">
+          <div
+            className="horizonSelector"
+            title={t(props.store.locale, "header.horizon", { hours: selectedHorizonLabel })}
+          >
+            <span className="horizonValue">{selectedHorizonLabel}</span>
+            <input
+              className="horizonSlider"
+              type="range"
+              min={0}
+              max={props.store.horizonOptions.length - 1}
+              step={1}
+              value={selectedHorizonIndex}
+              aria-label={t(props.store.locale, "header.horizon", { hours: selectedHorizonLabel })}
+              onInput={(event) => {
+                const index = Number(event.currentTarget.value);
+                props.store.setHorizon(props.store.horizonOptions[index] ?? null);
+              }}
+            />
+          </div>
+          {props.store.hass?.callWS && props.store.config.hub_entry_id && (
+            <label className="horizonSelector">
+              <span className="horizonValue">Past {formatHorizonDuration(props.store.pastHours * 3_600_000)}</span>
+              <input
+                className="horizonSlider"
+                aria-label="Historic hours"
+                type="range"
+                min={0}
+                max={props.store.pastOptions.length - 1}
+                value={Math.max(
+                  0,
+                  props.store.pastOptions.findIndex((hours) => hours >= props.store.pastHours)
+                )}
+                onInput={(event) =>
+                  props.store.setPastHours(props.store.pastOptions[Number(event.currentTarget.value)] ?? 0)
+                }
+              />
+            </label>
+          )}
         </div>
         <button
           type="button"
