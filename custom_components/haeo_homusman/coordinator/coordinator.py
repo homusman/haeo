@@ -3,12 +3,9 @@
 import asyncio
 from bisect import bisect_right
 from collections.abc import Callable, Collection, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import logging
-import math
-
-import numpy as np
 import time
 from typing import TYPE_CHECKING, Literal, TypedDict
 
@@ -41,8 +38,9 @@ from custom_components.haeo_homusman.core.adapters.network_builder import (
 from custom_components.haeo_homusman.core.adapters.registry import ELEMENT_TYPES
 from custom_components.haeo_homusman.core.const import (
     CONF_DEBOUNCE_SECONDS,
-    CONF_STABILITY_PENALTY_CENTS,
-    CONF_STABILITY_WINDOW_MINUTES,
+    CONF_FORECAST_CONFIDENCE_ENABLED,
+    CONF_PLAN_ACCEPTANCE_THRESHOLD,
+    CONF_PLAN_GATE_ENABLED,
     CONF_ELEMENT_TYPE,
     CONF_RELAX_INFEASIBLE,
     DEFAULT_DEBOUNCE_SECONDS,
@@ -64,6 +62,7 @@ from custom_components.haeo_homusman.elements import (
 )
 from custom_components.haeo_homusman.flows import HUB_SECTION_ADVANCED
 from custom_components.haeo_homusman.horizon import HorizonManager
+
 from custom_components.haeo_homusman.input_stores import (
     raise_for_rejected_input,
     unavailable_input_placeholders,
@@ -82,6 +81,8 @@ from custom_components.haeo_homusman.repairs import (
 from custom_components.haeo_homusman.services import async_save_diagnostics
 from custom_components.haeo_homusman.util import network_subentry
 
+from .plan_acceptance import THRESHOLD, adjust_grid_prices, assess_plan
+from .plan_history import PlanHistory
 from .network import evaluate_network_connectivity
 
 if TYPE_CHECKING:
@@ -335,6 +336,8 @@ class CoordinatorData:
     """When the optimization started."""
 
     completed_at: datetime
+    boundaries: tuple[float, ...] = ()
+    actions: Mapping[str, tuple[float, ...]] | None = None
     """When the optimization completed."""
 
 
@@ -412,7 +415,9 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         # Elements whose inputs changed since an optimization last applied them to the network
         self._stale_elements: set[str] = set()
         # Prior successful plan, aligned by absolute UTC period boundaries.
-        self._previous_battery_plan: dict[str, tuple[list[float], np.ndarray]] = {}
+        self._accepted: CoordinatorData | None = None
+        self.plan_history = PlanHistory(hass, config_entry.entry_id)
+        self.plan_decision: dict[str, str | float | None] = {}
 
         # No update_interval - we're event-driven from input entities
         # No request_refresh_debouncer - we handle debouncing ourselves
@@ -447,6 +452,13 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         This is called from async_setup_entry after all input entities are loaded.
         """
         loaded_configs = self._load_from_input_stores()
+        periods_seconds = tuple(horizon_manager.periods_seconds)
+        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
+        confidence = advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False)
+        gate = advanced.get(CONF_PLAN_GATE_ENABLED, False)
+        threshold = float(advanced.get(CONF_PLAN_ACCEPTANCE_THRESHOLD, THRESHOLD))
+        if confidence:
+            loaded_configs = adjust_grid_prices(loaded_configs, forecast_timestamps)
 
         _LOGGER.debug("Initializing network with %d participants", len(loaded_configs))
 
@@ -739,6 +751,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._failure_issue_raised = False
             dismiss_optimization_failure_issue(self.hass, self.config_entry.entry_id)
             return
+        self.plan_decision = {"reason": "unavailable"}
         now = time.time()
         reported = isinstance(self.last_exception, ReportedUpdateFailed)
         if self._failing_since is None:
@@ -760,41 +773,6 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             create_optimization_persistent_failure_issue(
                 self.hass, self.config_entry.entry_id, str(self.optimization_error)
             )
-
-    def _stability_references(
-        self, timestamps: Sequence[float], period_count: int
-    ) -> dict[str, tuple[np.ndarray, np.ndarray]]:
-        """Align the previous successful battery plan to the new UTC horizon."""
-        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
-        penalty_cents = float(advanced.get(CONF_STABILITY_PENALTY_CENTS, 0.0))
-        window_minutes = float(advanced.get(CONF_STABILITY_WINDOW_MINUTES, 60))
-        if not math.isfinite(penalty_cents) or penalty_cents <= 0 or window_minutes <= 0:
-            return {}
-        if len(timestamps) < period_count:
-            return {}
-        current = [float(t) for t in timestamps[:period_count]]
-        anchor = current[0]
-        result = {}
-        for name, (previous_times, previous_power) in self._previous_battery_plan.items():
-            if not previous_times or not len(previous_power):
-                continue
-            reference = np.zeros(period_count)
-            weights = np.zeros(period_count)
-            for index, now in enumerate(current):
-                offset = (now - anchor) / 60.0
-                weight = max(0.0, 1.0 - offset / window_minutes)
-                if weight <= 0 or now < previous_times[0]:
-                    continue
-                previous_index = bisect_right(previous_times, now) - 1
-                if previous_index < 0 or previous_index >= len(previous_power):
-                    continue
-                # After the final previously planned interval, no comparison
-                # exists. The final timestamp is the previous horizon boundary.
-                reference[index] = float(previous_power[previous_index])
-                weights[index] = weight
-            if np.any(weights):
-                result[name] = (reference, weights)
-        return result
 
     async def _async_update_data(self) -> CoordinatorData:
         """Optimize with the inputs as they are now and build the outputs of the plan."""
@@ -822,7 +800,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         network = self.network
         if network.n_periods == len(horizon_manager.periods_seconds):
             network.update_periods(periods_in_hours(horizon_manager.periods_seconds))
-            for element_name in self._stale_elements:
+            for element_name in loaded_configs if confidence else self._stale_elements:
                 self._element_updaters[element_name](loaded_configs[element_name])
         else:
             # An entity horizon can change how many periods it has, and the network's
@@ -831,27 +809,14 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             network = self._build_network(loaded_configs)
         self._stale_elements.clear()
 
-        advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
-        penalty_cents = float(advanced.get(CONF_STABILITY_PENALTY_CENTS, 0.0))
-        network.set_stability_reference(
-            self._stability_references(forecast_timestamps, network.n_periods),
-            penalty_dollars_per_kwh=penalty_cents / 100.0,
-        )
         cost = await self._solve(network, context, started_at, forecast_timestamps)
-        # Store only successful plans. A failed solve must not overwrite the
-        # reference; align by actual UTC timestamps on the next successful run.
-        powers = network.battery_power_snapshot()
-        self._previous_battery_plan = {
-            name: (list(map(float, forecast_timestamps[:len(power)])), power)
-            for name, power in powers.items()
-        }
 
         end_time = time.time()
         self._last_optimization_time = time.monotonic()
         _LOGGER.debug("Optimization completed successfully with cost: %s", cost)
         await self._report_relaxations(network, context, started_at, forecast_timestamps)
 
-        return CoordinatorData(
+        candidate = CoordinatorData(
             context=context,
             outputs=self._build_outputs(
                 network, context, loaded_configs, cost, end_time - start_time, forecast_timestamps
@@ -859,6 +824,53 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             started_at=started_at,
             completed_at=dt_util.utc_from_timestamp(end_time).astimezone(),
         )
+        candidate.boundaries = tuple(forecast_timestamps)
+        candidate.actions = network.action_snapshot()
+        previous = self._accepted
+        reason, benchmark = "gate_disabled", None
+        if gate and network.relaxations:
+            raise UpdateFailed("Plan acceptance requires a feasible candidate")
+        if gate:
+            reason, benchmark = await self.hass.async_add_executor_job(
+                assess_plan,
+                loaded_configs,
+                periods_seconds,
+                candidate.boundaries,
+                candidate.actions,
+                cost,
+                previous.boundaries if previous else (),
+                previous.actions if previous else None,
+                threshold,
+            )
+        self.plan_decision = {
+            "reason": reason,
+            "candidate_cost": cost,
+            "incumbent_cost": benchmark,
+            "benefit": None if benchmark is None else benchmark - cost,
+            "threshold": threshold if gate else 0.0,
+        }
+        accepted = reason not in ("same_action", "below_threshold")
+        await self.plan_history.record(candidate, self.plan_decision, accepted)
+        if not accepted and previous is not None:
+            return self._rebase_accepted(previous, candidate.boundaries[0])
+        self._accepted = candidate
+        return candidate
+
+    def _rebase_accepted(self, accepted: CoordinatorData, now: float) -> CoordinatorData:
+        """Publish current values of the accepted trajectory at the rolling horizon start."""
+        outputs = {}
+        for name, devices in accepted.outputs.items():
+            outputs[name] = {}
+            for device, series in devices.items():
+                outputs[name][device] = {}
+                for key, output in series.items():
+                    points = output.forecast
+                    if points and output.state == points[0]["value"]:
+                        index = max(0, bisect_right([point["time"].timestamp() for point in points], now) - 1)
+                        output = replace(output, state=points[index]["value"])
+                    outputs[name][device][key] = output
+        return replace(accepted, outputs=outputs)
+
 
     def _check_inputs(self, context: OptimizationContext) -> None:
         """Raise when an input cannot be read, and keep the input repair issues current.

@@ -10,6 +10,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
+from homeassistant.components import websocket_api
 from homeassistant.components.frontend import DOMAIN as FRONTEND_DOMAIN
 from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
@@ -64,6 +65,7 @@ from custom_components.haeo_homusman.util import (
     remove_deleted_elements_rules,
 )
 
+from .coordinator.plan_history import websocket_plans
 from . import migrations as _migrations
 
 if TYPE_CHECKING:
@@ -104,6 +106,7 @@ async def async_setup(hass: HomeAssistant, _config: ConfigType) -> bool:
 
     Registers domain-level services that are available even before any config entries are loaded.
     """
+    websocket_api.async_register_command(hass, websocket_plans)
     await _async_register_static_frontend_resources(hass)
     await async_setup_services(hass)
     return True

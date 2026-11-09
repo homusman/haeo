@@ -1,6 +1,6 @@
 """Network class for electrical system modeling and optimization."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial
 import logging
@@ -28,9 +28,9 @@ from .elements.deferrable_load import DeferrableLoad, DeferrableLoadElementConfi
 from .elements.node import Node, NodeElementConfig
 from .elements.policy_pricing import PolicyPricing, PolicyPricingElementConfig
 from .infeasibility import InfeasibleError, Relaxation, RowLabel, conflicting_rows, listing, row_labels, solve_relaxed
-from .linear import LinearArray, Rows, total
+from .linear import LinearArray, total
 from .solver import Solver
-from .util.solver_rows import RowIndices, add_rows, update_rows
+from .util.solver_rows import RowIndices, add_rows
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -191,12 +191,6 @@ class Network:
         self._solver = Solver()
         # Weight the last blended solve settled on, where the next one starts
         self._blend_weight: float | None = None
-        # Homusman near-term dispatch stability: $/kWh of deviation.
-        self._stability_reference: dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]] = {}
-        self._stability_price: float = 0.0
-        self._stability_delta: dict[str, LinearArray] = {}
-        self._stability_rows: dict[str, tuple[RowIndices, object]] = {}
-        self._stability_cost: LinearArray | None = None
 
         # Redirect HiGHS logging to Python logger at debug level
         self._solver.cbLogging += self._log_callback
@@ -303,76 +297,30 @@ class Network:
         secondary = total(element.secondary_cost() for element in self.elements.values())
         return (primary, secondary)
 
-    def set_stability_reference(
-        self,
-        previous: dict[str, tuple[NDArray[np.float64], NDArray[np.float64]]],
-        penalty_dollars_per_kwh: float,
-    ) -> None:
-        """Set timestamp-aligned previous battery powers and near-term weights."""
-        if not math.isfinite(penalty_dollars_per_kwh) or penalty_dollars_per_kwh < 0:
-            raise ValueError("Stability penalty must be nonnegative and finite")
-        self._stability_price = penalty_dollars_per_kwh
-        self._stability_reference = previous
-
-    def _apply_stability(self) -> None:
-        """Maintain linear absolute-deviation inequalities in the existing LP."""
-        objectives = []
-        if not self._stability_reference and not self._stability_delta:
-            self._stability_cost = None
-            return
+    def _action_series(self) -> dict[str, LinearArray]:
+        """Return modeled net grid and battery power, in kW."""
+        actions: dict[str, LinearArray] = {}
         for name, element in self.elements.items():
-            if not isinstance(element, Battery):
-                continue
-            charge = self.elements.get(f"{name}:charge")
-            discharge = self.elements.get(f"{name}:discharge")
-            if not isinstance(charge, Connection) or not isinstance(discharge, Connection):
-                continue
-            reference, weights = self._stability_reference.get(
-                name, (np.zeros(self.n_periods), np.zeros(self.n_periods))
-            )
-            reference = np.asarray(reference, dtype=np.float64)
-            weights = np.asarray(weights, dtype=np.float64)
-            if reference.shape != (self.n_periods,) or weights.shape != (self.n_periods,):
-                raise ValueError(f"Stability reference for {name} has wrong horizon shape")
-            if not np.all(np.isfinite(reference)) or not np.all(np.isfinite(weights)):
-                raise ValueError(f"Nonfinite stability reference for {name}")
-            if np.any(weights < 0):
-                raise ValueError(f"Negative stability weights for {name}")
-            if name not in self._stability_delta and not np.any(weights):
-                continue
-            delta = self._stability_delta.get(name)
-            if delta is None:
-                delta = self._solver.add_variables(self.n_periods, name=f"{name}.stability_delta")
-                self._stability_delta[name] = delta
-
-            signed_power = discharge.total_measured_power - charge.total_measured_power
-            rows = Rows.concat((
-                signed_power - reference <= delta,
-                reference - signed_power <= delta,
-            ))
-            if name in self._stability_rows:
-                indices, applied = self._stability_rows[name]
-                self._stability_rows[name] = (indices, update_rows(self._solver, indices, applied, rows))
+            if isinstance(element, Battery):
+                positive, negative = self.elements.get(f"{name}:discharge"), self.elements.get(f"{name}:charge")
+            elif isinstance(element, Node):
+                positive, negative = self.elements.get(f"{name}:import"), self.elements.get(f"{name}:export")
             else:
-                self._stability_rows[name] = add_rows(self._solver, rows)
-            objectives.append((delta * (self.periods * weights * self._stability_price)).total())
-        self._stability_cost = total(objectives)
-
-    def battery_power_snapshot(self) -> dict[str, NDArray[np.float64]]:
-        """Read signed net battery kW from solved model, not live telemetry."""
-        solution = self._solver.column_values()
-        snapshot = {}
-        for name, element in self.elements.items():
-            if not isinstance(element, Battery):
                 continue
-            charge = self.elements.get(f"{name}:charge")
-            discharge = self.elements.get(f"{name}:discharge")
-            if isinstance(charge, Connection) and isinstance(discharge, Connection):
-                power = discharge.total_measured_power - charge.total_measured_power
-                snapshot[name] = power.value(solution).copy()
-        return snapshot
+            if isinstance(positive, Connection) and isinstance(negative, Connection):
+                actions[name] = positive.total_measured_power - negative.total_measured_power
+        return actions
 
-    def optimize(self) -> float:
+    def action_snapshot(self) -> dict[str, tuple[float, ...]]:
+        """Capture solved actions without keeping mutable solver values."""
+        solution = self._solver.column_values()
+        return {name: tuple(map(float, power.value(solution))) for name, power in self._action_series().items()}
+
+    def optimize_incumbent(self, actions: Mapping[str, float]) -> float:
+        """Solve a disposable network with first-period actions fixed."""
+        return self.optimize(committed_actions=actions)
+
+    def optimize(self, *, committed_actions: Mapping[str, float] | None = None) -> float:
         """Solve the optimization problem and return the primary objective value.
 
         The plan has the lowest cost and, among equally cheap plans, the lowest
@@ -397,11 +345,11 @@ class Network:
                 msg = f"Failed to apply constraints for element '{element_name}'"
                 raise ValueError(msg) from e
 
-        self._apply_stability()
+        if committed_actions is not None:
+            series = self._action_series()
+            for name, action in committed_actions.items():
+                add_rows(h, series[name][0] == action)
         primary, secondary = self.cost()
-        electricity_cost = primary
-        if primary is not None and self._stability_cost is not None:
-            primary = primary + self._stability_cost
         if primary is None:
             msg = "Network has no primary cost — add pricing to connections or nodes"
             raise ValueError(msg)
@@ -416,13 +364,10 @@ class Network:
         self.conflicts = ()
         self.relaxations = ()
         try:
-            total_cost = self._solve(all_col_indices, objectives)
-            return (
-                float(electricity_cost.value(h.column_values()).sum())
-                if electricity_cost is not None and self._stability_cost is not None
-                else total_cost
-            )
+            return self._solve(all_col_indices, objectives)
         except InfeasibleError:
+            if committed_actions is not None:
+                raise
             balance_rows = {
                 row
                 for element in self.elements.values()
@@ -439,11 +384,7 @@ class Network:
             raise InfeasibleError(self.conflicts)
         cost, self.relaxations = relaxed
         _LOGGER.debug("Relaxed constraints to find a plan: %s", listing(map(str, self.relaxations)))
-        return (
-            float(electricity_cost.value(h.column_values()).sum())
-            if electricity_cost is not None and self._stability_cost is not None
-            else cost
-        )
+        return cost
 
     def _solve(self, all_col_indices: NDArray[np.int32], objectives: Objectives) -> float:
         """Solve the blended objective, calibrating its weight on the first solve."""

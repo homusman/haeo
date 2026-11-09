@@ -1,6 +1,7 @@
 import type { JSX } from "preact";
 import { mdiIcons } from "../mdi-icons";
 
+import { PlanControls } from "../plan-view";
 import { ChartSvg } from "./ChartSvg";
 import { Legend } from "./Legend";
 import { Tooltip } from "./Tooltip";
@@ -167,6 +168,7 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
   return (
     <ha-card>
       <CardTitle store={props.store} />
+      <PlanControls key={props.store.config.hub_entry_id} store={props.store} />
       <div className="chartRow">
         <div className="chartContainer">
           {props.store.hasData ? (

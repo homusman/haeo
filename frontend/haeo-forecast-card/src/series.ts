@@ -23,6 +23,7 @@ interface EntityRegistryEntryLike {
 }
 
 interface HassLike {
+  callWS?<T>(message: Record<string, unknown>): Promise<T>;
   states: Record<string, HassEntityState | undefined>;
   entities?: Record<string, EntityRegistryEntryLike | undefined>;
   devices?: Record<string, { config_entries: string[] } | undefined>;

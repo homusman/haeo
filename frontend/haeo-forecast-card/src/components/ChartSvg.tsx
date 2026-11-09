@@ -121,6 +121,16 @@ const PlotViewport = observer(function PlotViewport(props: { store: ForecastCard
       overflow="hidden"
     >
       <g transform={`translate(${-store.margins.left} ${-store.plotTop})`}>
+        {store.previewPlan?.accepted_at && (
+          <line
+            x1={store.xScale(Date.parse(store.previewPlan.accepted_at))}
+            x2={store.xScale(Date.parse(store.previewPlan.accepted_at))}
+            y1={store.plotTop}
+            y2={store.plotBottom}
+            stroke="currentColor"
+            stroke-dasharray="2 4"
+          />
+        )}
         <WindowLayer store={store} />
         <PowerLayer store={store} />
         <OverlayLayers store={store} />

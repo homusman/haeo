@@ -2,7 +2,7 @@ name: Publish HAEO Homusman HACS release
 
 on:
   push:
-    branches: [main]
+    branches: [main, plan-acceptance-preview]
     paths:
       - "custom_components/haeo_homusman/**"
       - "frontend/haeo-forecast-card/**"
@@ -46,6 +46,8 @@ jobs:
       - name: Build standalone Lovelace card assets
         run: |
           npm --prefix frontend/haeo-forecast-card ci
+          npm --prefix frontend/haeo-forecast-card run typecheck
+          npm --prefix frontend/haeo-forecast-card test
           npm --prefix frontend/haeo-forecast-card run build
           python - <<'PY'
           from pathlib import Path
@@ -60,6 +62,7 @@ jobs:
           PY
       - name: Determine and stamp next release version
         id: version
+        if: github.ref_name != 'plan-acceptance-preview'
         run: |
           python - <<'PY'
           import json, os, pathlib, re, subprocess
@@ -89,6 +92,16 @@ jobs:
           git commit --allow-empty -m "release: v${VERSION}"
           git tag "v${VERSION}"
           git push origin "refs/tags/v${VERSION}"
+      - name: Stamp isolated preview
+        if: github.ref_name == 'plan-acceptance-preview'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("custom_components/haeo_homusman/manifest.json")
+          manifest = json.loads(path.read_text())
+          assert manifest["version"] == "0.5.4b1"
+          PY
       - name: Package HACS integration
         run: |
           cd custom_components/haeo_homusman
@@ -96,6 +109,7 @@ jobs:
             -x "*/__pycache__/*" "__pycache__/*" "*.pyc" \
                "*/tests/*" "tests/*"
       - name: Publish versioned GitHub release
+        if: github.ref_name != 'plan-acceptance-preview'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -103,3 +117,14 @@ jobs:
             haeo_homusman.zip --repo "${{ github.repository }}" \
             --title "HAEO - Homusman fork v${{ steps.version.outputs.version }}" \
             --generate-notes --latest
+
+      - name: Publish plan acceptance preview
+        if: github.ref_name == 'plan-acceptance-preview'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum haeo_homusman.zip > haeo_homusman.zip.sha256
+          gh release create v0.5.4b1 haeo_homusman.zip haeo_homusman.zip.sha256 \
+            --repo "${{ github.repository }}" --target "${{ github.sha }}" \
+            --title "HAEO Homusman v0.5.4b1" --prerelease --latest=false \
+            --notes-file docs/homusman-plan-preview.md
