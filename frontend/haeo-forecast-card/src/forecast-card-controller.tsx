@@ -70,7 +70,7 @@ export class ForecastCardController {
   }
 
   getCardSize(): number {
-    const targetHeight = this.store.responsiveHeight(this.store.cardWidth);
+    const targetHeight = this.store.cardWidth <= 768 ? 1040 : 820;
     return Math.max(1, Math.ceil(targetHeight / MASONRY_ROW_HEIGHT_PX));
   }
 
@@ -79,12 +79,12 @@ export class ForecastCardController {
     min_rows: number;
     columns: "full";
   } {
-    const targetHeight = this.store.responsiveHeight(this.store.cardWidth);
+    const targetHeight = this.store.cardWidth <= 768 ? 1040 : 820;
     const rowUnit = SECTIONS_ROW_HEIGHT_PX + SECTIONS_ROW_GAP_PX;
     const rows = Math.max(2, Math.ceil((targetHeight + SECTIONS_ROW_GAP_PX) / rowUnit));
     return {
       rows,
-      min_rows: Math.max(2, rows - 1),
+      min_rows: rows,
       columns: "full",
     };
   }

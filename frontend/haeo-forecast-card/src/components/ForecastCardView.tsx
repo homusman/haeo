@@ -169,8 +169,13 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
   const pinned = props.store.pinnedPlanId;
   useEffect(() => {
     if (!pinned) return;
-    const unpin = (): void => {
-      if (props.store.pinnedPlanId) props.store.toggleComparisonPin();
+    const unpin = (event: MouseEvent): void => {
+      const adjustsScale = event
+        .composedPath()
+        .some(
+          (node) => node instanceof Element && node.matches(".axisControls, .horizonSelectors, .powerModeToggleButton")
+        );
+      if (!adjustsScale && props.store.pinnedPlanId) props.store.toggleComparisonPin();
     };
     window.addEventListener("click", unpin);
     return () => window.removeEventListener("click", unpin);
@@ -197,7 +202,7 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
   }
 
   return (
-    <ha-card className={pinned ? "pinnedComparison" : undefined}>
+    <ha-card className="forecastCard">
       <CardTitle store={props.store} />
       <div className="axisControls">
         <label>
@@ -229,7 +234,11 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           />
         </label>
       </div>
-      <div className={pinned ? "comparisonLayout" : "chartRow"}>
+      <div
+        className={["comparisonLayout", pinned && "isPinned", props.store.tooltipVisible && "hasInfo"]
+          .filter(Boolean)
+          .join(" ")}
+      >
         <div className="chartContainer primaryChart">
           {props.store.hasData ? (
             <ChartSection
@@ -251,17 +260,13 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
             />
           </div>
         )}
-        {props.store.hasData &&
-          props.store.tooltipVisible &&
-          (pinned ? (
-            <div className="comparisonInfo">
-              <TooltipSection store={props.store} />
-            </div>
-          ) : (
-            <TooltipSection store={props.store} />
-          ))}
+        {props.store.hasData && (props.store.tooltipVisible || pinned) && (
+          <div className="comparisonInfo">
+            {pinned && <HistoricPlanInfo store={props.store} />}
+            {props.store.tooltipVisible && <TooltipSection store={props.store} />}
+          </div>
+        )}
       </div>
-      {pinned && <HistoricPlanInfo store={props.store} />}
       {props.store.hasData && <LegendSection store={props.store} />}
       <PlanControls key={props.store.config.hub_entry_id} store={props.store} />
     </ha-card>

@@ -1,4 +1,5 @@
 import { render } from "preact";
+import { act } from "preact/test-utils";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ForecastCardView } from "./components/ForecastCardView";
@@ -125,10 +126,16 @@ describe("ForecastCardView components", () => {
     ]);
     store.setPointer(store.margins.left + 2, store.plotTop + 5);
     store.toggleComparisonPin();
-    render(<ForecastCardView store={store} onPointerMove={() => undefined} onPointerLeave={() => undefined} />, root);
+    act(() => {
+      render(<ForecastCardView store={store} onPointerMove={() => undefined} onPointerLeave={() => undefined} />, root);
+    });
     const layout = root.querySelector(".comparisonLayout");
     expect(layout?.querySelectorAll(":scope > .chartContainer > svg")).toHaveLength(2);
     expect(layout?.querySelectorAll(":scope > .comparisonInfo > .tooltip")).toHaveLength(1);
+    root.querySelector<HTMLInputElement>('input[aria-label="Price range"]')!.click();
+    expect(store.pinnedPlanId).toBe("old");
+    window.dispatchEvent(new MouseEvent("click"));
+    expect(store.pinnedPlanId).toBeNull();
   });
 
   it("renders chart lanes and legend items", () => {
