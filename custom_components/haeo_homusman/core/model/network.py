@@ -298,17 +298,20 @@ class Network:
         return (primary, secondary)
 
     def _action_series(self) -> dict[str, LinearArray]:
-        """Return modeled net grid and battery power, in kW."""
+        """Return scheduled storage and flexible-load actions, leaving grid flows free."""
         actions: dict[str, LinearArray] = {}
         for name, element in self.elements.items():
             if isinstance(element, Battery):
-                positive, negative = self.elements.get(f"{name}:discharge"), self.elements.get(f"{name}:charge")
-            elif isinstance(element, Node):
-                positive, negative = self.elements.get(f"{name}:import"), self.elements.get(f"{name}:export")
-            else:
-                continue
-            if isinstance(positive, Connection) and isinstance(negative, Connection):
-                actions[name] = positive.total_measured_power - negative.total_measured_power
+                discharge = self.elements.get(f"{name}:discharge")
+                charge = self.elements.get(f"{name}:charge")
+                if isinstance(discharge, Connection) and isinstance(charge, Connection):
+                    actions[f'{name}:discharge'] = discharge.total_measured_power
+                    actions[f'{name}:charge'] = charge.total_measured_power
+            elif isinstance(element, DeferrableLoad):
+                # EV trip loads are exogenous. The EV home charge/discharge is committed above.
+                connection = self.elements.get(f"{name}:connection")
+                if isinstance(connection, Connection):
+                    actions[name] = connection.total_measured_power
         return actions
 
     def action_snapshot(self) -> dict[str, tuple[float, ...]]:
@@ -316,11 +319,11 @@ class Network:
         solution = self._solver.column_values()
         return {name: tuple(map(float, power.value(solution))) for name, power in self._action_series().items()}
 
-    def optimize_incumbent(self, actions: Mapping[str, float]) -> float:
-        """Solve a disposable network with first-period actions fixed."""
+    def optimize_incumbent(self, actions: Mapping[str, tuple[float, ...]]) -> float:
+        """Solve a disposable network with the overlapping schedule fixed."""
         return self.optimize(committed_actions=actions)
 
-    def optimize(self, *, committed_actions: Mapping[str, float] | None = None) -> float:
+    def optimize(self, *, committed_actions: Mapping[str, tuple[float, ...]] | None = None) -> float:
         """Solve the optimization problem and return the primary objective value.
 
         The plan has the lowest cost and, among equally cheap plans, the lowest
@@ -345,10 +348,13 @@ class Network:
                 msg = f"Failed to apply constraints for element '{element_name}'"
                 raise ValueError(msg) from e
 
+        commitment_labels: dict[int, RowLabel] = {}
         if committed_actions is not None:
             series = self._action_series()
-            for name, action in committed_actions.items():
-                add_rows(h, series[name][0] == action)
+            for name, actions in committed_actions.items():
+                for period, action in enumerate(actions):
+                    rows, _ = add_rows(h, series[name][period] == action)
+                    commitment_labels[int(rows[0])] = RowLabel(name, f"held power {action:g} kW", period)
         primary, secondary = self.cost()
         if primary is None:
             msg = "Network has no primary cost — add pricing to connections or nodes"
@@ -366,8 +372,6 @@ class Network:
         try:
             return self._solve(all_col_indices, objectives)
         except InfeasibleError:
-            if committed_actions is not None:
-                raise
             balance_rows = {
                 row
                 for element in self.elements.values()
@@ -375,8 +379,9 @@ class Network:
                 for row in rows.tolist()
             }
             labels = row_labels(self.constraints(), self.n_periods, balance_rows)
-            self.conflicts = conflicting_rows(h, labels)
-            if not self.relax_infeasible:
+            labels.update(commitment_labels)
+            self.conflicts = conflicting_rows(h, labels, include_bounds=committed_actions is not None)
+            if committed_actions is not None or not self.relax_infeasible:
                 raise InfeasibleError(self.conflicts) from None
 
         relaxed = solve_relaxed(h, labels, partial(self._solve, all_col_indices, objectives))

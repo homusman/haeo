@@ -202,6 +202,7 @@ async def websocket_plans(hass: HomeAssistant, connection: websocket_api.ActiveC
         connection.send_error(msg["id"], "not_found", "Plan unavailable")
     else:
         if not msg.get("plan_id"):
+            response["current_plan"] = coordinator.accepted_metadata
             response["measurements"] = {
                 subentry.title: {
                     "entity_id": entity_id,

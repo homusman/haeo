@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from custom_components.haeo_homusman.coordinator import HaeoDataUpdateCoordinator
+from custom_components.haeo_homusman.coordinator.plan_acceptance import PlanAssessment
 from custom_components.haeo_homusman.coordinator.plan_history import PlanHistory
 from custom_components.haeo_homusman.core.const import (
     CONF_FORECAST_CONFIDENCE_ENABLED,
@@ -22,7 +23,7 @@ def test_initialize_then_optimize(enabled: bool) -> None:
     async def run() -> None:
         coordinator = object.__new__(HaeoDataUpdateCoordinator)
         coordinator.hass = Mock()
-        coordinator.hass.async_add_executor_job = AsyncMock(return_value=("bootstrap", None))
+        coordinator.hass.async_add_executor_job = AsyncMock(return_value=PlanAssessment("bootstrap"))
         coordinator.config_entry = SimpleNamespace(entry_id="test", data={
             HUB_SECTION_ADVANCED: {
                 CONF_FORECAST_CONFIDENCE_ENABLED: enabled,
@@ -58,10 +59,20 @@ def test_initialize_then_optimize(enabled: bool) -> None:
         ):
             await coordinator.async_initialize()
             plan = await coordinator._async_update_data()
-        assert plan.boundaries == boundaries
-        assert coordinator.plan_decision["reason"] == ("bootstrap" if enabled else "gate_disabled")
-        assert coordinator.hass.async_add_executor_job.await_count == int(enabled)
-        coordinator.plan_history.record.assert_awaited_once()
+            assert plan.boundaries == boundaries
+            assert coordinator.plan_decision["reason"] == ("bootstrap" if enabled else "gate_disabled")
+            assert coordinator.hass.async_add_executor_job.await_count == int(enabled)
+            coordinator.plan_history.record.assert_awaited_once()
+
+            if enabled:
+                shifted = (60.0, 3660.0)
+                coordinator._runtime_data.horizon_manager.get_forecast_timestamps = lambda: shifted
+                coordinator.hass.async_add_executor_job.return_value = PlanAssessment("below_threshold", 0.1, network)
+                continuation = await coordinator._async_update_data()
+                assert continuation.boundaries == shifted
+                assert continuation.completed_at == plan.completed_at
+                assert coordinator.plan_history.record.await_args.args[2] is False
+                assert coordinator.accepted_metadata["rolling_cost"] == 0.1
 
     asyncio.run(run())
 

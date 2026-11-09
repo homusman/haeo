@@ -12,7 +12,20 @@ export interface PlanSummary {
   accepted_at: string;
   ended_at: string | null;
   ends: number;
-  decision: { reason: string; benefit: number | null; candidate_cost?: number };
+  decision: {
+    reason: string;
+    benefit: number | null;
+    candidate_cost?: number;
+    conflicts?: string | null;
+    accepted?: boolean;
+  };
+}
+
+export interface CurrentPlanMetadata {
+  accepted_at: string;
+  ends: number;
+  rolling_cost?: number;
+  decision: PlanSummary["decision"];
 }
 
 export interface PlanDetail extends PlanSummary {
@@ -38,6 +51,7 @@ export interface RecorderState {
 
 interface ArchivePage {
   plans: PlanSummary[];
+  current_plan?: CurrentPlanMetadata | null;
   measurements?: Record<string, PowerMeasurement>;
   decision?: { status?: string; last_run?: string; benefit?: number | null; accepted?: boolean };
   archive: { plans: number; bytes: number };
@@ -113,6 +127,7 @@ export const PlanControls = observer(function PlanControls({
           if (cancelled) return;
           setArchive(page.archive);
           setDecision(page.decision);
+          store.setCurrentPlanMetadata(page.current_plan ?? null);
           store.setPowerMeasurements(page.measurements ?? {});
           plans.push(...page.plans);
           before =
@@ -238,22 +253,46 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
 }: {
   store: ForecastCardStore;
 }): JSX.Element | null {
-  const segment =
-    store.hoveredPlan ?? store.segments.find(({ plan }) => plan.id === store.pinnedPlanId) ?? store.pinnedSegment;
+  const segment = store.candidatePreview
+    ? null
+    : (store.hoveredPlan ?? store.segments.find(({ plan }) => plan.id === store.pinnedPlanId) ?? store.pinnedSegment);
   const selection = store.pinnedPlanId || store.candidatePreview;
   const clear = selection ? (
     <button type="button" onClick={() => store.clearComparison()}>
       Clear comparison
     </button>
   ) : null;
-  if (!segment)
+  if (!segment) {
+    const candidate = store.candidatePreview;
+    const current = store.currentPlanMetadata;
     return (
-      <aside className="historicPlanInfo" title="Hover over a past plan to see the acceptance decision.">
-        <strong>{store.candidatePreview ? "Candidate selected" : "Plan details"}</strong>
-        <div>Hover over a saved plan to see why it was accepted.</div>
+      <aside className="historicPlanInfo">
+        <strong>{candidate ? "Candidate" : "Current plan"}</strong>
+        {candidate ? (
+          <>
+            <div>Candidate cost {candidate.decision.candidate_cost?.toFixed(3) ?? "—"}</div>
+            <div>
+              {candidate.decision.accepted ? "Accepted" : "Not accepted"} ·{" "}
+              {candidate.decision.reason.replaceAll("_", " ")}
+            </div>
+            <div>Benefit {candidate.decision.benefit?.toFixed(3) ?? "—"}</div>
+            {candidate.decision.conflicts && <div>Conflicting constraints: {candidate.decision.conflicts}</div>}
+          </>
+        ) : current ? (
+          <>
+            <div>Accepted {new Date(current.accepted_at).toLocaleString()}</div>
+            <div>Horizon ends {new Date(current.ends * 1000).toLocaleString()}</div>
+            <div>Rolling cost {current.rolling_cost?.toFixed(3) ?? "—"}</div>
+            <div>{current.decision.reason.replaceAll("_", " ")}</div>
+            {current.decision.conflicts && <div>Conflicting constraints: {current.decision.conflicts}</div>}
+          </>
+        ) : (
+          <div>Waiting for the first accepted plan.</div>
+        )}
         {clear}
       </aside>
     );
+  }
   const { plan, index, previousIndex, previousCost, start, end } = segment;
   const nextCost = plan.decision.candidate_cost;
   const comparisonCost =
@@ -262,11 +301,11 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
     bootstrap:
       "There was no eligible active plan to continue, so the optimizer accepted this plan as its starting point.",
     accepted:
-      "The candidate changed the immediate action and beat continuing the preceding action by more than the configured threshold.",
+      "The candidate beat the cost of retaining the previous schedule and extending its tail by more than the configured threshold.",
     expired:
       "The preceding plan could no longer cover the next dispatch interval, so the optimizer accepted a fresh plan.",
     incumbent_infeasible:
-      "The preceding action could not satisfy the current model constraints. The optimizer accepted a feasible replacement.",
+      "The retained schedule and its extension could not satisfy the updated constraints. The optimizer accepted a feasible replacement.",
     commitment_boundary:
       "The next optimization interval crossed an action change in the preceding plan. The optimizer accepted a plan aligned to the new interval.",
   };
@@ -276,6 +315,7 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
       <div>{new Date(start).toLocaleString()}</div>
       <div>In action {Math.round((end - start) / 60_000)} min</div>
       <div>{reasons[plan.decision.reason] ?? plan.decision.reason.replaceAll("_", " ")}</div>
+      {plan.decision.conflicts && <div>Conflicting constraints: {plan.decision.conflicts}</div>}
       {nextCost !== undefined && <div>Saved plan cost {nextCost.toFixed(3)}</div>}
       {comparisonCost !== null && (
         <div>

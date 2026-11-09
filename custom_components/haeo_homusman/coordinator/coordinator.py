@@ -1,7 +1,6 @@
 """Data update coordinator for the Home Assistant Energy Optimizer integration."""
 
 import asyncio
-from bisect import bisect_right
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -82,7 +81,7 @@ from custom_components.haeo_homusman.repairs import (
 from custom_components.haeo_homusman.services import async_save_diagnostics
 from custom_components.haeo_homusman.util import network_subentry
 
-from .plan_acceptance import THRESHOLD, adjust_grid_prices, assess_plan, tariff_weights
+from .plan_acceptance import THRESHOLD, PlanAssessment, adjust_grid_prices, assess_plan, refine_configs, rolling_boundaries, tariff_weights
 from .plan_history import PlanHistory, input_forecasts
 from .network import evaluate_network_connectivity
 
@@ -418,6 +417,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._stale_elements: set[str] = set()
         # Prior successful plan, aligned by absolute UTC period boundaries.
         self._accepted: CoordinatorData | None = None
+        self._accepted_decision: dict[str, str | float | None] = {}
         self.plan_history = PlanHistory(hass, config_entry.entry_id)
         self.plan_decision: dict[str, str | float | None] = {}
 
@@ -798,20 +798,26 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         _LOGGER.debug("Running optimization with %d participants", len(loaded_configs))
 
-        # Bring the network to the horizon the inputs were loaded for, and apply the
-        # inputs that changed, before the solve is handed to the executor, so the
-        # network is never mutated while it is being solved
-        network = self.network
-        if network.n_periods == len(periods_seconds):
-            network.update_periods(periods_in_hours(periods_seconds))
-            for element_name in loaded_configs if confidence else self._stale_elements:
-                self._element_updaters[element_name](loaded_configs[element_name])
+        previous = self._accepted if gate else None
+        original = tuple(forecast_timestamps)
+        refined = rolling_boundaries(original, previous.boundaries, previous.actions) if previous else original
+        if refined != original:
+            loaded_configs = refine_configs(loaded_configs, original, refined)
+            periods_seconds = tuple(end - start for start, end in zip(refined[:-1], refined[1:], strict=True))
+            forecast_timestamps = refined
+            network = build_network(
+                f"haeo_rolling_{self.config_entry.entry_id}", loaded_configs, periods_seconds,
+                relax_infeasible=self._relax_infeasible,
+            )
         else:
-            # An entity horizon can change how many periods it has, and the network's
-            # variables are sized for the count it was built with
-            _LOGGER.debug("Rebuilding the network for %d periods", len(periods_seconds))
-            network = self._build_network(loaded_configs)
-        self._stale_elements.clear()
+            network = self.network
+            if network.n_periods == len(periods_seconds):
+                network.update_periods(periods_in_hours(periods_seconds))
+                for element_name in loaded_configs if confidence else self._stale_elements:
+                    self._element_updaters[element_name](loaded_configs[element_name])
+            else:
+                network = self._build_network(loaded_configs)
+            self._stale_elements.clear()
 
         captured_inputs = input_forecasts(self.hass, self.config_entry.entry_id)
         cost = await self._solve(network, context, started_at, forecast_timestamps)
@@ -832,12 +838,11 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         candidate.input_forecasts = captured_inputs
         candidate.boundaries = tuple(forecast_timestamps)
         candidate.actions = network.action_snapshot()
-        previous = self._accepted
-        reason, benchmark = "gate_disabled", None
+        assessment = PlanAssessment("gate_disabled")
         if gate and network.relaxations:
             raise UpdateFailed("Plan acceptance requires a feasible candidate")
         if gate:
-            reason, benchmark = await self.hass.async_add_executor_job(
+            assessment = await self.hass.async_add_executor_job(
                 assess_plan,
                 loaded_configs,
                 periods_seconds,
@@ -848,9 +853,19 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 previous.actions if previous else None,
                 threshold,
             )
-        accepted = reason not in ("same_action", "below_threshold")
+        benchmark = assessment.incumbent_cost
+        accepted = assessment.continuation is None
+        conflict = None
+        if assessment.reason == "incumbent_infeasible":
+            conflict = listing(
+                f"{row.element} {row.constraint}"
+                + (f" at {dt_util.utc_from_timestamp(forecast_timestamps[row.period]).isoformat()}"
+                   if row.period is not None else "")
+                for row in assessment.conflicts
+            ) or "Solver did not return specific conflicting constraints"
+            _LOGGER.warning("Accepted a replacement for an infeasible retained schedule: %s", conflict)
         self.plan_decision = {
-            "reason": reason,
+            "reason": assessment.reason,
             "accepted": accepted,
             "status": "success",
             "last_run": datetime.now(UTC).isoformat(),
@@ -858,28 +873,37 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "incumbent_cost": benchmark,
             "benefit": None if benchmark is None else benchmark - cost,
             "threshold": threshold if gate else 0.0,
+            "conflicts": conflict,
         }
         await self.plan_history.record(candidate, self.plan_decision, accepted)
-        if not accepted and previous is not None:
-            return self._rebase_accepted(previous, candidate.boundaries[0])
-        self._accepted = candidate
-        return candidate
+        if (continuation := assessment.continuation) is not None:
+            assert previous is not None and benchmark is not None
+            self._accepted_cost = benchmark
+            self._accepted = replace(
+                candidate,
+                completed_at=previous.completed_at,
+                outputs=self._build_outputs(
+                    continuation, context, loaded_configs, benchmark, end_time - start_time, forecast_timestamps
+                ),
+                actions=continuation.action_snapshot(),
+            )
+        else:
+            self._accepted = candidate
+            self._accepted_cost = cost
+            self._accepted_decision = self.plan_decision.copy()
+        return self._accepted
 
-    def _rebase_accepted(self, accepted: CoordinatorData, now: float) -> CoordinatorData:
-        """Publish current values of the accepted trajectory at the rolling horizon start."""
-        outputs = {}
-        for name, devices in accepted.outputs.items():
-            outputs[name] = {}
-            for device, series in devices.items():
-                outputs[name][device] = {}
-                for key, output in series.items():
-                    points = output.forecast
-                    if points and output.state == points[0]["value"]:
-                        index = max(0, bisect_right([point["time"].timestamp() for point in points], now) - 1)
-                        output = replace(output, state=points[index]["value"])
-                    outputs[name][device][key] = output
-        return replace(accepted, outputs=outputs)
-
+    @property
+    def accepted_metadata(self) -> dict[str, object] | None:
+        """Report the active acceptance and its current rolling horizon."""
+        if self._accepted is None:
+            return None
+        return {
+            "accepted_at": self._accepted.completed_at.astimezone(UTC).isoformat(),
+            "ends": self._accepted.boundaries[-1],
+            "decision": self._accepted_decision,
+            "rolling_cost": self._accepted_cost,
+        }
 
     def _check_inputs(self, context: OptimizationContext) -> None:
         """Raise when an input cannot be read, and keep the input repair issues current.

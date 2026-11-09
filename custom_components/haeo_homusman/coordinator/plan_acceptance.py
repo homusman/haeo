@@ -2,6 +2,7 @@
 
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
+from typing import cast
 from dataclasses import dataclass
 
 import numpy as np
@@ -13,11 +14,12 @@ from custom_components.haeo_homusman.core.const import (
     CONF_SPIKE_SUPPRESSION_ENABLED,
     TARIFF_NUMERIC_OPTIONS,
 )
-from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError
+from custom_components.haeo_homusman.core.model import Network
+from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError, RowLabel
 from custom_components.haeo_homusman.core.schema.elements import ElementConfigData, ElementType
 
 THRESHOLD = 0.02
-DEADBAND_KW = 0.1
+
 @dataclass(frozen=True, slots=True)
 class TariffWeights:
     """Settings for forecast deviation weighting."""
@@ -85,6 +87,59 @@ def adjust_grid_prices(
     return adjusted
 
 
+def rolling_boundaries(
+    boundaries: tuple[float, ...],
+    previous_boundaries: Sequence[float],
+    previous_actions: Mapping[str, tuple[float, ...]] | None,
+) -> tuple[float, ...]:
+    """Split periods at retained action changes and at the end of the old plan."""
+    if not previous_actions or not previous_boundaries:
+        return boundaries
+    retained = {
+        previous_boundaries[index]
+        for index in range(1, len(previous_boundaries) - 1)
+        if any(abs(values[index] - values[index - 1]) > 1e-7 for values in previous_actions.values())
+    }
+    retained.add(previous_boundaries[-1])
+    return tuple(sorted(set(boundaries) | {time for time in retained if boundaries[0] < time < boundaries[-1]}))
+
+
+def refine_configs(
+    configs: dict[str, ElementConfigData], original: Sequence[float], refined: Sequence[float]
+) -> dict[str, ElementConfigData]:
+    """Carry the same forecast values into split intervals in both solves."""
+    period_indices = np.searchsorted(original, refined[:-1], side="right") - 1
+
+    def expand(value: object) -> object:
+        if isinstance(value, np.ndarray) and value.ndim == 1:
+            if len(value) == len(original) - 1:
+                return value[period_indices]
+            if len(value) == len(original):
+                if value.dtype == np.dtype(bool):
+                    indices = np.searchsorted(original, refined, side="right") - 1
+                    return value[indices]
+                return np.interp(refined, original, value)
+        if isinstance(value, Mapping):
+            return {key: expand(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [expand(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(expand(item) for item in value)
+        return value
+
+    return cast(dict[str, ElementConfigData], expand(configs))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanAssessment:
+    """Result of comparing the candidate with the retained schedule and its tail."""
+
+    reason: str
+    incumbent_cost: float | None = None
+    continuation: Network | None = None
+    conflicts: tuple[RowLabel, ...] = ()
+
+
 def assess_plan(
     configs: dict[str, ElementConfigData],
     periods: Sequence[float],
@@ -94,26 +149,24 @@ def assess_plan(
     previous_boundaries: Sequence[float],
     previous_actions: Mapping[str, tuple[float, ...]] | None,
     threshold: float,
-) -> tuple[str, float | None]:
-    """Score a strict same-input incumbent and compare the near-term commitment."""
-    if not previous_actions or not actions or actions.keys() != previous_actions.keys():
-        return "bootstrap", None
-    index = bisect_right(previous_boundaries, boundaries[0]) - 1
-    if index < 0 or index >= len(previous_boundaries) - 1 or boundaries[1] > previous_boundaries[-1]:
-        return "expired", None
-    committed = {name: values[index] for name, values in previous_actions.items()}
-    for offset in range(index + 1, len(previous_boundaries) - 1):
-        if previous_boundaries[offset] >= boundaries[1]:
-            break
-        if any(abs(previous_actions[name][offset] - power) > 1e-7 for name, power in committed.items()):
-            return "commitment_boundary", None
+) -> PlanAssessment:
+    """Keep the old controllable schedule throughout the overlap and optimize only the tail."""
+    if not previous_actions or actions.keys() != previous_actions.keys():
+        return PlanAssessment("bootstrap")
+    if boundaries[0] < previous_boundaries[0] or boundaries[0] >= previous_boundaries[-1]:
+        return PlanAssessment("expired")
 
+    indices = [
+        bisect_right(previous_boundaries, time) - 1
+        for time in boundaries[:-1]
+        if time < previous_boundaries[-1]
+    ]
+    committed = {name: tuple(values[index] for index in indices) for name, values in previous_actions.items()}
     network = build_network("incumbent", configs, periods, relax_infeasible=False)
     try:
         benchmark = network.optimize_incumbent(committed)
-    except InfeasibleError:
-        return "incumbent_infeasible", None
-    if all(abs(values[0] - committed[name]) <= DEADBAND_KW for name, values in actions.items()):
-        return "same_action", benchmark
-    return ("accepted" if benchmark - cost > threshold else "below_threshold"), benchmark
-
+    except InfeasibleError as error:
+        return PlanAssessment("incumbent_infeasible", conflicts=error.conflicts)
+    if benchmark - cost > threshold:
+        return PlanAssessment("accepted", benchmark)
+    return PlanAssessment("below_threshold", benchmark, network)

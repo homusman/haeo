@@ -24,8 +24,8 @@ from custom_components.haeo_homusman.core.model.elements import (
 )
 
 
-def make_battery_network():
-    network = Network(name="stability", periods=np.array([1.0]))
+def make_battery_network(periods=(1.0,)):
+    network = Network(name="stability", periods=np.array(periods))
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_BATTERY,
         "name": "battery", "capacity": 10.0, "initial_charge": 5.0,
@@ -59,16 +59,16 @@ def test_incumbent_values_the_cost_of_holding_current_power() -> None:
     candidate = make_battery_network()
     incumbent = make_battery_network()
     cost = candidate.optimize()
-    assert candidate.action_snapshot()["battery"][0] == pytest.approx(5.0)
-    assert incumbent.optimize_incumbent({"battery": 0.0}) - cost == pytest.approx(0.05)
-    assert incumbent.action_snapshot()["battery"][0] == pytest.approx(0.0)
+    assert candidate.action_snapshot()["battery:discharge"][0] == pytest.approx(5.0)
+    assert incumbent.optimize_incumbent({"battery:discharge": (0.0,), "battery:charge": (0.0,)}) - cost == pytest.approx(0.05)
+    assert incumbent.action_snapshot()["battery:discharge"][0] == pytest.approx(0.0)
 
 
 def test_incumbent_does_not_relax_an_impossible_action() -> None:
     from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError
 
     with pytest.raises(InfeasibleError):
-        make_battery_network().optimize_incumbent({"battery": 6.0})
+        make_battery_network().optimize_incumbent({"battery:discharge": (6.0,), "battery:charge": (0.0,)})
 
 
 def test_confidence_preserves_current_price_and_shrinks_distant_spikes() -> None:
@@ -87,7 +87,7 @@ def test_confidence_preserves_current_price_and_shrinks_distant_spikes() -> None
 @pytest.mark.parametrize(
     ("committed", "threshold", "expected"),
     [(0.0, 0.02, "accepted"), (0.0, 0.06, "below_threshold"),
-     (5.0, 0.0, "same_action"), (6.0, 0.02, "incumbent_infeasible")],
+     (5.0, 0.0, "below_threshold"), (6.0, 0.02, "incumbent_infeasible")],
 )
 def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, expected) -> None:
     from custom_components.haeo_homusman.coordinator import plan_acceptance
@@ -101,11 +101,13 @@ def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, exp
     monkeypatch.setattr(plan_acceptance, "build_network", build_incumbent)
     candidate = make_battery_network()
     cost = candidate.optimize()
-    reason, _ = plan_acceptance.assess_plan(
+    result = plan_acceptance.assess_plan(
         {}, (3600.0,), (3600.0, 7200.0), candidate.action_snapshot(),
-        cost, (3600.0, 7200.0), {"battery": (committed,)}, threshold,
+        cost, (3600.0, 7200.0), {"battery:discharge": (committed,), "battery:charge": (0.0,)}, threshold,
     )
-    assert reason == expected
+    assert result.reason == expected
+    if expected == 'incumbent_infeasible':
+        assert any('limit' in row.constraint for row in result.conflicts)
 
 def test_spike_scale_controls_deviation_without_time_weighting() -> None:
     from custom_components.haeo_homusman.coordinator.plan_acceptance import adjust_tariff, tariff_weights
@@ -123,3 +125,44 @@ def test_spike_scale_controls_deviation_without_time_weighting() -> None:
     }))
     assert small[0] == large[0] == values[0]
     assert small[24] < large[24] < values[24]
+
+def test_holds_all_overlapping_actions_and_extends_only_the_tail(monkeypatch) -> None:
+    from custom_components.haeo_homusman.coordinator import plan_acceptance
+
+    monkeypatch.setattr(plan_acceptance, "build_network", lambda *args, **kwargs: make_battery_network((1., 1., 1.)))
+    candidate = make_battery_network((1., 1., 1.))
+    cost = candidate.optimize()
+    result = plan_acceptance.assess_plan(
+        {}, (3600., 3600., 3600.), (0., 3600., 7200., 10800.),
+        candidate.action_snapshot(), cost, (0., 3600., 7200.),
+        {"battery:discharge": (1., 2.), "battery:charge": (0., 0.)}, 1.,
+    )
+    assert result.reason == "below_threshold"
+    assert result.continuation is not None
+    assert result.continuation.action_snapshot()["battery:discharge"] == pytest.approx((1., 2., 2.))
+
+
+def test_future_commitment_can_make_the_incumbent_infeasible(monkeypatch) -> None:
+    from custom_components.haeo_homusman.coordinator import plan_acceptance
+
+    monkeypatch.setattr(plan_acceptance, "build_network", lambda *args, **kwargs: make_battery_network((1., 1.)))
+    candidate = make_battery_network((1., 1.))
+    cost = candidate.optimize()
+    result = plan_acceptance.assess_plan(
+        {}, (3600., 3600.), (0., 3600., 7200.),
+        candidate.action_snapshot(), cost, (0., 3600., 7200.),
+        {"battery:discharge": (4., 4.), "battery:charge": (0., 0.)}, 100.,
+    )
+    assert result.reason == "incumbent_infeasible"
+    assert result.continuation is None
+    assert any(row.period == 1 and "held power" in row.constraint for row in result.conflicts)
+
+
+def test_refinement_preserves_switch_time_and_splits_forecast_values() -> None:
+    from custom_components.haeo_homusman.coordinator.plan_acceptance import refine_configs, rolling_boundaries
+
+    original = (1800., 5400., 9000.)
+    refined = rolling_boundaries(original, (0., 3600., 7200.), {"battery:discharge": (1., 2.)})
+    assert refined == (1800., 3600., 5400., 7200., 9000.)
+    result = refine_configs({"element": {"price": np.array([0.2, 0.4])}}, original, refined)
+    assert result["element"]["price"] == pytest.approx([0.2, 0.2, 0.4, 0.4])

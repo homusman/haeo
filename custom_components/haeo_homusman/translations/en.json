@@ -79,7 +79,7 @@
               "tariff_baseline_hours": "Tariff baseline time constant (hours)",
               "spike_scale_cents_per_kwh": "Spike scale (cents/kWh)",
               "max_spike_suppression": "Maximum spike suppression (0–1)",
-              "plan_gate_enabled": "Enable near-term plan acceptance gate",
+              "plan_gate_enabled": "Enable rolling plan acceptance gate",
               "plan_acceptance_threshold": "Minimum modeled savings (currency units)",
               "record_forecasts": "Record forecast data",
               "relax_infeasible": "Relax impossible plans"

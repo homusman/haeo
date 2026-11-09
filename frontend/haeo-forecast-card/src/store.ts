@@ -10,7 +10,7 @@ import { classifyPowerSeries, isPowerPotentialSeries, powerPairKey } from "./pow
 import { normalizeSeries } from "./series";
 import { type WindowBand, windowBands } from "./window-bands";
 import type { HassLike } from "./series";
-import type { PlanDetail, PlanSegment, RecorderState } from "./plan-view";
+import type { CurrentPlanMetadata, PlanDetail, PlanSegment, RecorderState } from "./plan-view";
 import type { LineSvgPath, PowerShape } from "./store-paths";
 import { computeHoveredPowerKeys, computePowerShapes, computePricePaths, computeSocPaths } from "./store-paths";
 import { buildTooltipRows, type TooltipSectionId } from "./tooltip-helpers";
@@ -80,6 +80,7 @@ export class ForecastCardStore {
   historyClock = Date.now();
   historyReady = false;
   candidatePreview: PlanDetail | null = null;
+  currentPlanMetadata: CurrentPlanMetadata | null = null;
   comparisonError = "";
   private comparisonRequest = 0;
   segments: PlanSegment[] = [];
@@ -156,6 +157,10 @@ export class ForecastCardStore {
     this.historyReady = true;
   }
 
+  setCurrentPlanMetadata(plan: CurrentPlanMetadata | null): void {
+    this.currentPlanMetadata = plan;
+  }
+
   setCandidatePreview(plan: PlanDetail | null): void {
     this.candidatePreview = plan;
   }
@@ -196,6 +201,7 @@ export class ForecastCardStore {
     if (this.config.hub_entry_id !== config.hub_entry_id) {
       this.setSegments([]);
       this.clearComparison();
+      this.setCurrentPlanMetadata(null);
       this.restoreRangeSettings(config.hub_entry_id);
       this.setActuals({});
       this.setPowerMeasurements({});

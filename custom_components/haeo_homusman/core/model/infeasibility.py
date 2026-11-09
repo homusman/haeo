@@ -11,7 +11,7 @@ period they cover, so a conflict reads in terms of the network.
 
 from collections.abc import Callable, Iterable, Mapping
 from collections.abc import Set as AbstractSet
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Final, NamedTuple
 
 from highspy import Highs, HighsStatus, IisStrategy
@@ -113,7 +113,9 @@ def row_labels(
     return labels
 
 
-def conflicting_rows(solver: Highs, labels: Mapping[int, RowLabel]) -> tuple[RowLabel, ...]:
+def conflicting_rows(
+    solver: Highs, labels: Mapping[int, RowLabel], *, include_bounds: bool = False
+) -> tuple[RowLabel, ...]:
     """Return a smallest set of rows that cannot all hold, from a solve that found the model infeasible."""
     _, previous = solver.getOptionValue("iis_strategy")
     solver.setOptionValue("iis_strategy", _IIS_STRATEGY)
@@ -123,7 +125,16 @@ def conflicting_rows(solver: Highs, labels: Mapping[int, RowLabel]) -> tuple[Row
         solver.setOptionValue("iis_strategy", previous)
     if status != HighsStatus.kOk or not iis.valid_:
         return ()
-    return tuple(labels[row] for row in iis.row_index_)
+    if not include_bounds:
+        return tuple(labels[row] for row in iis.row_index_)
+    conflicts = []
+    for index in iis.row_index_:
+        label = labels.get(index, RowLabel("LP", f"row {index}", None))
+        row_status, lower, upper, _ = solver.getRow(index)
+        if row_status == HighsStatus.kOk:
+            label = replace(label, constraint=f"{label.constraint} (LP bounds {lower:g} to {upper:g})")
+        conflicts.append(label)
+    return tuple(conflicts)
 
 
 class RelaxedRows(NamedTuple):
