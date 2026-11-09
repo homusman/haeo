@@ -11,6 +11,15 @@ CONF_DEBOUNCE_SECONDS: Final = "debounce_seconds"
 CONF_RELAX_INFEASIBLE: Final = "relax_infeasible"
 CONF_PLAN_ACCEPTANCE_THRESHOLD: Final = "plan_acceptance_threshold"
 CONF_PLAN_GATE_ENABLED: Final = "plan_gate_enabled"
+CONF_SPIKE_SUPPRESSION_ENABLED: Final = "spike_suppression_enabled"
+TARIFF_NUMERIC_OPTIONS: Final = {
+    "confidence_midpoint_hours": (12.0, 0.0, 168.0),
+    "confidence_width_hours": (3.0, 0.1, 72.0),
+    "confidence_floor": (0.6, 0.0, 1.0),
+    "tariff_baseline_hours": (3.0, 0.1, 72.0),
+    "spike_scale_cents_per_kwh": (30.0, 0.1, 10000.0),
+    "max_spike_suppression": (0.5, 0.0, 1.0),
+}
 CONF_FORECAST_CONFIDENCE_ENABLED: Final = "forecast_confidence_enabled"
 CONF_HORIZON: Final = "horizon"
 CONF_HORIZON_PRESET: Final = "horizon_preset"

@@ -1,3 +1,4 @@
+import { discoverActualSources } from "./actual-sources";
 import { computed, makeAutoObservable, observable } from "mobx";
 
 import { clamp, linearScale } from "./geometry";
@@ -108,6 +109,7 @@ export class ForecastCardStore {
       // Home Assistant's whole state tree on every update blocks the main thread.
       hass: observable.ref,
       segments: observable.ref,
+      actualSources: computed.struct,
       candidatePreview: observable.ref,
       historyDetails: observable.ref,
       actuals: observable.ref,
@@ -155,6 +157,10 @@ export class ForecastCardStore {
 
   addHistoryDetail(detail: PlanDetail): void {
     this.historyDetails = { ...this.historyDetails, [detail.id]: detail };
+  }
+
+  get actualSources(): Record<string, string> {
+    return discoverActualSources(this.hass, this.config, this.normalizedSeriesCache);
   }
 
   setActuals(actuals: Record<string, RecorderState[]>): void {

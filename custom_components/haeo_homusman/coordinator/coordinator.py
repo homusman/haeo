@@ -39,6 +39,7 @@ from custom_components.haeo_homusman.core.adapters.registry import ELEMENT_TYPES
 from custom_components.haeo_homusman.core.const import (
     CONF_DEBOUNCE_SECONDS,
     CONF_FORECAST_CONFIDENCE_ENABLED,
+    CONF_SPIKE_SUPPRESSION_ENABLED,
     CONF_PLAN_ACCEPTANCE_THRESHOLD,
     CONF_PLAN_GATE_ENABLED,
     CONF_ELEMENT_TYPE,
@@ -81,7 +82,7 @@ from custom_components.haeo_homusman.repairs import (
 from custom_components.haeo_homusman.services import async_save_diagnostics
 from custom_components.haeo_homusman.util import network_subentry
 
-from .plan_acceptance import THRESHOLD, adjust_grid_prices, assess_plan
+from .plan_acceptance import THRESHOLD, adjust_grid_prices, assess_plan, tariff_weights
 from .plan_history import PlanHistory
 from .network import evaluate_network_connectivity
 
@@ -786,11 +787,13 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         periods_seconds = tuple(horizon_manager.periods_seconds)
         advanced = self.config_entry.data.get(HUB_SECTION_ADVANCED, {})
-        confidence = advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False)
+        confidence = advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False) or advanced.get(
+            CONF_SPIKE_SUPPRESSION_ENABLED, False
+        )
         gate = advanced.get(CONF_PLAN_GATE_ENABLED, False)
         threshold = float(advanced.get(CONF_PLAN_ACCEPTANCE_THRESHOLD, THRESHOLD))
         if confidence:
-            loaded_configs = adjust_grid_prices(loaded_configs, forecast_timestamps)
+            loaded_configs = adjust_grid_prices(loaded_configs, forecast_timestamps, tariff_weights(advanced))
 
         _LOGGER.debug("Running optimization with %d participants", len(loaded_configs))
 

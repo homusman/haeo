@@ -18,6 +18,8 @@ from custom_components.haeo_homusman.core.const import (
     CONF_PLAN_ACCEPTANCE_THRESHOLD,
     CONF_PLAN_GATE_ENABLED,
     CONF_FORECAST_CONFIDENCE_ENABLED,
+    CONF_SPIKE_SUPPRESSION_ENABLED,
+    TARIFF_NUMERIC_OPTIONS,
 )
 from custom_components.haeo_homusman.flows.horizon import async_horizon_preset_labels, validate_horizon
 
@@ -56,6 +58,8 @@ def hub_settings_data(entry: ConfigEntry, user_input: Mapping[str, Any]) -> dict
             CONF_PLAN_ACCEPTANCE_THRESHOLD: advanced.get(CONF_PLAN_ACCEPTANCE_THRESHOLD, 0.02),
             CONF_PLAN_GATE_ENABLED: advanced.get(CONF_PLAN_GATE_ENABLED, False),
             CONF_FORECAST_CONFIDENCE_ENABLED: advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False),
+            CONF_SPIKE_SUPPRESSION_ENABLED: advanced.get(CONF_SPIKE_SUPPRESSION_ENABLED, False),
+            **{key: advanced.get(key, default) for key, (default, _, _) in TARIFF_NUMERIC_OPTIONS.items()},
         },
         CONF_RECORD_FORECASTS: advanced.get(CONF_RECORD_FORECASTS, False),
     }

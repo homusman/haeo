@@ -72,12 +72,12 @@ def test_incumbent_does_not_relax_an_impossible_action() -> None:
 
 
 def test_confidence_preserves_current_price_and_shrinks_distant_spikes() -> None:
-    from custom_components.haeo_homusman.coordinator.plan_acceptance import adjust_tariff
+    from custom_components.haeo_homusman.coordinator.plan_acceptance import adjust_tariff, tariff_weights
 
     values = np.full(48, -0.1)
     values[0] = 3.0
     values[24] = 2.0
-    result = adjust_tariff(values, np.arange(49) * 3600)
+    result = adjust_tariff(values, np.arange(49) * 3600, tariff_weights({'forecast_confidence_enabled': True}))
     assert result[0] == 3.0
     assert 0.8 < result[24] < 1.6
     assert result[-1] < 0
@@ -106,3 +106,20 @@ def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, exp
         cost, (3600.0, 7200.0), {"battery": (committed,)}, threshold,
     )
     assert reason == expected
+
+def test_spike_scale_controls_deviation_without_time_weighting() -> None:
+    from custom_components.haeo_homusman.coordinator.plan_acceptance import adjust_tariff, tariff_weights
+
+    values = np.full(48, 0.25)
+    values[0] = 2
+    values[24] = 1
+    boundaries = np.arange(49) * 3600
+    assert adjust_tariff(values, boundaries, tariff_weights({})) is values
+    small = adjust_tariff(values, boundaries, tariff_weights({
+        "spike_suppression_enabled": True, "spike_scale_cents_per_kwh": 15,
+    }))
+    large = adjust_tariff(values, boundaries, tariff_weights({
+        "spike_suppression_enabled": True, "spike_scale_cents_per_kwh": 150,
+    }))
+    assert small[0] == large[0] == values[0]
+    assert small[24] < large[24] < values[24]

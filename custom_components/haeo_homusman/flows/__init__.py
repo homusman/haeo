@@ -23,6 +23,8 @@ from custom_components.haeo_homusman.core.const import (
     CONF_PLAN_ACCEPTANCE_THRESHOLD,
     CONF_PLAN_GATE_ENABLED,
     CONF_FORECAST_CONFIDENCE_ENABLED,
+    CONF_SPIKE_SUPPRESSION_ENABLED,
+    TARIFF_NUMERIC_OPTIONS,
     DEFAULT_DEBOUNCE_SECONDS,
 )
 from custom_components.haeo_homusman.core.const import HUB_SECTION_ADVANCED as HUB_SECTION_ADVANCED
@@ -106,7 +108,7 @@ def get_hub_options_schema(config_entry: ConfigEntry, preset_labels: Mapping[str
         ),
         SectionDefinition(
             key=HUB_SECTION_ADVANCED,
-            fields=(CONF_DEBOUNCE_SECONDS, CONF_ADVANCED_MODE, CONF_RELAX_INFEASIBLE, CONF_PLAN_GATE_ENABLED, CONF_PLAN_ACCEPTANCE_THRESHOLD, CONF_FORECAST_CONFIDENCE_ENABLED, CONF_RECORD_FORECASTS),
+            fields=(CONF_DEBOUNCE_SECONDS, CONF_ADVANCED_MODE, CONF_RELAX_INFEASIBLE, CONF_PLAN_GATE_ENABLED, CONF_PLAN_ACCEPTANCE_THRESHOLD, CONF_FORECAST_CONFIDENCE_ENABLED, CONF_SPIKE_SUPPRESSION_ENABLED, *TARIFF_NUMERIC_OPTIONS, CONF_RECORD_FORECASTS),
             collapsed=True,
         ),
     )
@@ -162,6 +164,15 @@ def get_hub_options_schema(config_entry: ConfigEntry, preset_labels: Mapping[str
                 ),
                 bool,
             ),
+            CONF_SPIKE_SUPPRESSION_ENABLED: (
+                vol.Required(CONF_SPIKE_SUPPRESSION_ENABLED, default=advanced_data.get(CONF_SPIKE_SUPPRESSION_ENABLED, False)),
+                bool,
+            ),
+            **{
+                key: (vol.Required(key, default=advanced_data.get(key, default)),
+                      vol.All(vol.Coerce(float), vol.Range(min=minimum, max=maximum)))
+                for key, (default, minimum, maximum) in TARIFF_NUMERIC_OPTIONS.items()
+            },
             CONF_RECORD_FORECASTS: (
                 vol.Required(
                     CONF_RECORD_FORECASTS,

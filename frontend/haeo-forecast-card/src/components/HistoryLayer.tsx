@@ -64,7 +64,7 @@ function path(store: ForecastCardStore, series: ForecastSeries, points: Point[],
 }
 
 function actualPoints(store: ForecastCardStore, series: ForecastSeries): Point[] {
-  const id = store.config.actual_entities?.[series.entityId];
+  const id = store.actualSources[series.entityId];
   if (!id) return [];
   const unit = store.hass?.states[id]?.attributes["unit_of_measurement"];
   const scales: Record<string, number> = { W: 1, kW: 1000, MW: 1_000_000 };
@@ -153,7 +153,7 @@ export const HistoryLayer = observer(function HistoryLayer({
         })}
       {selected &&
         visible
-          .filter((series) => store.config.actual_entities?.[series.entityId])
+          .filter((series) => store.actualSources[series.entityId])
           .map((series) => {
             const points: Point[] = Array.from(series.times, (time, index) => [time, series.values[index]!]);
             const clipped = clipPlanPoints(points, store.historyClock, max, series.drawType === "line");

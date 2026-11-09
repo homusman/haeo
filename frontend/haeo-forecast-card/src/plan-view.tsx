@@ -68,7 +68,7 @@ export const PlanControls = observer(function PlanControls({
   const hub = store.config.hub_entry_id;
   const enabled = !!store.hass?.callWS && !!hub;
   const past = store.pastHours;
-  const measurements = store.config.actual_entities;
+  const measurements = store.actualSources;
   const horizon = store.historyLimitHours;
 
   useEffect(() => {
@@ -218,7 +218,8 @@ export const PlanControls = observer(function PlanControls({
       )}
       {past > 0 && (
         <div>
-          Accepted history · {measurements ? "solid measurement traces" : "configure actual_entities for measurements"}
+          Accepted history ·{" "}
+          {Object.keys(measurements).length ? "solid measurement traces" : "no matching measurement inputs"}
         </div>
       )}
       {error && <div role="status">{error}</div>}
