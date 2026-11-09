@@ -538,9 +538,6 @@ ha-card {
   border-radius: 0.4rem;
   font-size: 0.75rem;
 }
-.comparisonSpacer {
-  visibility: hidden;
-}
 .chartRow {
   flex: 1 1 220px;
 }
@@ -593,7 +590,44 @@ ha-card {
     flex: 1 1 220px;
     height: auto;
   }
-  .comparisonSpacer {
-    display: none;
+}
+
+ha-card.pinnedComparison {
+  overflow-y: auto;
+}
+.comparisonLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: repeat(2, minmax(300px, 1fr));
+  flex: 1 0 600px;
+  min-height: 600px;
+}
+.comparisonLayout > .primaryChart {
+  grid-area: 1 / 1;
+}
+.comparisonLayout > .comparisonChart {
+  grid-area: 2 / 1;
+}
+.comparisonInfo {
+  grid-area: 1 / 2 / 3 / 3;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  width: clamp(16rem, 30cqw, 24rem);
+}
+.comparisonInfo > .tooltip {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  max-inline-size: none;
+}
+@container (max-width: 768px) {
+  .comparisonLayout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(300px, 1fr)) auto;
+    flex-basis: auto;
+  }
+  .comparisonInfo {
+    grid-area: 3 / 1;
+    width: auto;
   }
 }

@@ -197,7 +197,7 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
   }
 
   return (
-    <ha-card>
+    <ha-card className={pinned ? "pinnedComparison" : undefined}>
       <CardTitle store={props.store} />
       <div className="axisControls">
         <label>
@@ -229,8 +229,8 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           />
         </label>
       </div>
-      <div className="chartRow primaryChart">
-        <div className="chartContainer">
+      <div className={pinned ? "comparisonLayout" : "chartRow"}>
+        <div className="chartContainer primaryChart">
           {props.store.hasData ? (
             <ChartSection
               store={props.store}
@@ -241,11 +241,8 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
             <div className="empty">{t(props.store.locale, "card.empty.no_data")}</div>
           )}
         </div>
-        {props.store.hasData && props.store.tooltipVisible && <TooltipSection store={props.store} />}
-      </div>
-      {pinned && (
-        <div className="chartRow comparisonChart">
-          <div className="chartContainer">
+        {pinned && (
+          <div className="chartContainer comparisonChart">
             <ChartSvg
               store={props.store}
               comparison
@@ -253,11 +250,17 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
               onPointerLeave={props.onPointerLeave}
             />
           </div>
-          {props.store.hasData && props.store.tooltipVisible && (
-            <div className="tooltip comparisonSpacer" aria-hidden="true" />
-          )}
-        </div>
-      )}
+        )}
+        {props.store.hasData &&
+          props.store.tooltipVisible &&
+          (pinned ? (
+            <div className="comparisonInfo">
+              <TooltipSection store={props.store} />
+            </div>
+          ) : (
+            <TooltipSection store={props.store} />
+          ))}
+      </div>
       {pinned && <HistoricPlanInfo store={props.store} />}
       {props.store.hasData && <LegendSection store={props.store} />}
       <PlanControls key={props.store.config.hub_entry_id} store={props.store} />

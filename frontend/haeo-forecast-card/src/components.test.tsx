@@ -101,6 +101,36 @@ describe("ForecastCardView components", () => {
     render(null, root);
   });
 
+  it("uses one shared cursor panel beside the two pinned plots", () => {
+    const store = new ForecastCardStore();
+    store.setConfig(testCardConfig);
+    store.setHass(testFixture);
+    const now = store.fullXDomain.min;
+    store.setHistoryClock(now);
+    store.setPastHours(1);
+    store.setSegments([
+      {
+        plan: {
+          id: "old",
+          accepted_at: new Date(now - 3600_000).toISOString(),
+          ended_at: null,
+          ends: now / 1000 + 3600,
+          decision: { reason: "accepted", benefit: 0.1 },
+        },
+        start: now - 3600_000,
+        end: now,
+        index: -1,
+        previousIndex: -2,
+      },
+    ]);
+    store.setPointer(store.margins.left + 2, store.plotTop + 5);
+    store.toggleComparisonPin();
+    render(<ForecastCardView store={store} onPointerMove={() => undefined} onPointerLeave={() => undefined} />, root);
+    const layout = root.querySelector(".comparisonLayout");
+    expect(layout?.querySelectorAll(":scope > .chartContainer > svg")).toHaveLength(2);
+    expect(layout?.querySelectorAll(":scope > .comparisonInfo > .tooltip")).toHaveLength(1);
+  });
+
   it("renders chart lanes and legend items", () => {
     const store = new ForecastCardStore();
     store.setConfig(testCardConfig);
