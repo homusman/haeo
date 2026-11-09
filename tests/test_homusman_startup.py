@@ -71,8 +71,9 @@ def test_ungated_ticks_do_not_grow_archive(tmp_path) -> None:
     async def run() -> None:
         hass = Mock()
         hass.config.path.side_effect = lambda *parts: str(tmp_path.joinpath(*parts))
-        history = PlanHistory(hass, "test")
-        history.store = Mock(async_load=AsyncMock(return_value=None), async_save=AsyncMock())
+        storage = Mock(async_load=AsyncMock(return_value=None), async_save=AsyncMock())
+        with patch("custom_components.haeo_homusman.coordinator.plan_history.Store", return_value=storage):
+            history = PlanHistory(hass, "test")
         now = datetime.now(UTC)
         plan = SimpleNamespace(outputs={}, completed_at=now, boundaries=(now.timestamp(), now.timestamp() + 3600))
         await history.record(plan, {"reason": "gate_disabled"}, True)
