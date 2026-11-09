@@ -7,6 +7,7 @@ on:
       - "custom_components/haeo_homusman/**"
       - "frontend/haeo-forecast-card/**"
       - ".github/workflows/homusman-hacs-release.yml"
+      - "tests/test_homusman_*.py"
   workflow_dispatch:
 
 permissions:
