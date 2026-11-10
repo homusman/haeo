@@ -20,6 +20,7 @@ from custom_components.haeo_homusman.core.const import (
     CONF_FORECAST_CONFIDENCE_ENABLED,
     CONF_SPIKE_SUPPRESSION_ENABLED,
     TARIFF_NUMERIC_OPTIONS,
+    CORRECTION_NUMERIC_OPTIONS,
 )
 from custom_components.haeo_homusman.flows.horizon import async_horizon_preset_labels, validate_horizon
 
@@ -60,6 +61,7 @@ def hub_settings_data(entry: ConfigEntry, user_input: Mapping[str, Any]) -> dict
             CONF_FORECAST_CONFIDENCE_ENABLED: advanced.get(CONF_FORECAST_CONFIDENCE_ENABLED, False),
             CONF_SPIKE_SUPPRESSION_ENABLED: advanced.get(CONF_SPIKE_SUPPRESSION_ENABLED, False),
             **{key: advanced.get(key, default) for key, (default, _, _) in TARIFF_NUMERIC_OPTIONS.items()},
+            **{key: advanced.get(key, default) for key, (default, _, _) in CORRECTION_NUMERIC_OPTIONS.items()},
         },
         CONF_RECORD_FORECASTS: advanced.get(CONF_RECORD_FORECASTS, False),
     }

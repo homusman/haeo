@@ -860,7 +860,7 @@ export class ForecastCardStore {
       : this.historyReady && time < this.historyClock
         ? historic
           ? this.sortPowerSeries(
-              archivedSeries(this.visibleSeries, this.hass, historic).filter(
+              archivedSeries(this.visibleSeries, this.hass, historic, undefined, undefined, true).filter(
                 ({ lane, sourceRole }) => lane === "power" && sourceRole !== "limit"
               )
             )
@@ -907,7 +907,7 @@ export class ForecastCardStore {
     for (const segment of this.segments) {
       const detail = this.historyDetails[segment.plan.id];
       if (detail && segment.start < max && segment.end > min) {
-        const historic = archivedSeries(this.visibleSeries, this.hass, detail);
+        const historic = archivedSeries(this.visibleSeries, this.hass, detail, undefined, undefined, true);
         differences.push(...compute(historic, Math.max(min, segment.start), Math.min(max, segment.end)));
       }
     }

@@ -81,7 +81,10 @@ from custom_components.haeo_homusman.repairs import (
 from custom_components.haeo_homusman.services import async_save_diagnostics
 from custom_components.haeo_homusman.util import network_subentry
 
-from .plan_acceptance import THRESHOLD, PlanAssessment, assess_plan, refine_configs, rolling_boundaries, tariff_weights
+from .plan_acceptance import (
+    THRESHOLD, PlanAssessment, assess_plan, correction_summary, elapsed_corrections, extend_reference,
+    refine_configs, rolling_boundaries, schedule_changed, tariff_weights,
+)
 from .plan_history import PlanHistory, input_forecasts
 from .network import evaluate_network_connectivity
 
@@ -338,6 +341,10 @@ class CoordinatorData:
     completed_at: datetime
     boundaries: tuple[float, ...] = ()
     actions: Mapping[str, tuple[float, ...]] | None = None
+    reference_actions: Mapping[str, tuple[float, ...]] | None = None
+    correction_energy_used: Mapping[str, float] | None = None
+    revision: int = 0
+    corrections: dict[str, dict[str, float]] | None = None
     input_forecasts: dict | None = None
     """When the optimization completed."""
 
@@ -808,6 +815,8 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             refined = (
                 rolling_boundaries(remaining, previous.boundaries, previous.actions) if previous else remaining
             )
+            if previous and previous.reference_actions:
+                refined = rolling_boundaries(refined, previous.boundaries, previous.reference_actions)
             if refined != original:
                 loaded_configs = refine_configs(loaded_configs, original, refined)
                 periods_seconds = tuple(end - start for start, end in zip(refined[:-1], refined[1:], strict=True))
@@ -846,6 +855,14 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         candidate.input_forecasts = captured_inputs
         candidate.boundaries = tuple(forecast_timestamps)
         candidate.actions = network.action_snapshot()
+        candidate.reference_actions = candidate.actions
+        candidate.correction_energy_used = {}
+        used = (
+            elapsed_corrections(
+                previous.boundaries, previous.actions, previous.reference_actions or previous.actions,
+                candidate.boundaries[0], previous.correction_energy_used or {},
+            ) if previous and previous.actions else {}
+        )
         assessment = PlanAssessment("gate_disabled")
         if gate and network.relaxations:
             raise UpdateFailed("Plan acceptance requires a feasible candidate")
@@ -858,10 +875,13 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 candidate.actions,
                 cost,
                 previous.boundaries if previous else (),
-                previous.actions if previous else None,
+                (previous.reference_actions or previous.actions) if previous else None,
                 threshold,
                 network,
                 tariff_weights(advanced) if confidence else None,
+                float(advanced.get("plan_correction_power_kw", 0.1)),
+                float(advanced.get("plan_correction_energy_kwh", 0.25)),
+                used,
             )
         benchmark = assessment.incumbent_cost
         accepted = assessment.continuation is None
@@ -888,22 +908,34 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "threshold": threshold if gate else 0.0,
             "conflicts": conflict,
         }
-        await self.plan_history.record(candidate, self.plan_decision, accepted)
         if (continuation := assessment.continuation) is not None:
             assert previous is not None and benchmark is not None
             self._accepted_cost = benchmark
+            actions = continuation.action_snapshot()
+            reference = extend_reference(
+                candidate.boundaries, previous.boundaries, previous.reference_actions or previous.actions, actions,
+            )
+            revision = previous.revision + int(schedule_changed(
+                candidate.boundaries, actions, previous.boundaries, previous.actions,
+            ))
             self._accepted = replace(
                 candidate,
                 completed_at=previous.completed_at,
                 outputs=self._build_outputs(
                     continuation, context, loaded_configs, benchmark, end_time - start_time, forecast_timestamps
                 ),
-                actions=continuation.action_snapshot(),
+                actions=actions,
+                reference_actions=reference,
+                correction_energy_used=used,
+                revision=revision,
+                corrections=correction_summary(candidate.boundaries, actions, reference, used),
             )
         else:
             self._accepted = candidate
             self._accepted_cost = cost
             self._accepted_decision = self.plan_decision.copy()
+        self.plan_decision["revision"] = self._accepted.revision
+        await self.plan_history.record(candidate, self.plan_decision, accepted, previous=previous, active=self._accepted)
         return self._accepted
 
     @property
@@ -916,6 +948,9 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "ends": self._accepted.boundaries[-1],
             "decision": self._accepted_decision,
             "rolling_cost": self._accepted_cost,
+            "revision": self._accepted.revision,
+            "correction_energy_used": self._accepted.correction_energy_used,
+            "corrections": self._accepted.corrections,
         }
 
     def _check_inputs(self, context: OptimizationContext) -> None:

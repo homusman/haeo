@@ -108,6 +108,62 @@ def test_elapsed_interval_would_double_count_discharge() -> None:
     assert remaining.optimize_incumbent(actions) == pytest.approx(-0.05 * 59 / 60)
 
 
+def test_bounded_correction_fixes_small_soc_mismatch_and_minimizes_change() -> None:
+    network = make_battery_network(initial_charge=4.95)
+    original = {"battery:discharge": (5.0,), "battery:charge": (0.0,)}
+    network.optimize_incumbent(original, correction_power=0.1, correction_energy=0.25)
+    actions = network.action_snapshot()
+    assert actions["battery:discharge"][0] == pytest.approx(4.95, abs=1e-7)
+    assert actions["battery:charge"][0] == pytest.approx(0.0, abs=1e-7)
+    assert not network.relaxations
+    assert original["battery:discharge"] == (5.0,)
+
+
+@pytest.mark.parametrize("power,energy,used", [(0.04, 0.25, {}), (0.1, 0.04, {}), (0.1, 0.25, {"battery": 0.21})])
+def test_correction_rejects_power_energy_or_lifetime_budget_overrun(power, energy, used) -> None:
+    from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError
+
+    network = make_battery_network(initial_charge=4.95)
+    with pytest.raises(InfeasibleError):
+        network.optimize_incumbent(
+            {"battery:discharge": (5.0,), "battery:charge": (0.0,)},
+            correction_power=power, correction_energy=energy, energy_used=used,
+        )
+
+
+def test_economic_opportunity_alone_does_not_nudge_the_retained_plan() -> None:
+    network = make_battery_network()
+    original = {"battery:discharge": (0.0,), "battery:charge": (0.0,)}
+    network.optimize_incumbent(original, correction_power=0.1, correction_energy=0.25)
+    assert network.action_snapshot()["battery:discharge"][0] == pytest.approx(0.0, abs=1e-7)
+
+
+def test_charge_and_discharge_share_the_power_correction_bound() -> None:
+    from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError
+
+    original = {"battery:discharge": (5.06,), "battery:charge": (5.06,)}
+    with pytest.raises(InfeasibleError):
+        make_battery_network().optimize_incumbent(original, correction_power=0.1, correction_energy=0.25)
+    network = make_battery_network()
+    network.optimize_incumbent(original, correction_power=0.2, correction_energy=0.25)
+    assert network.action_snapshot()["battery:discharge"][0] == pytest.approx(5.0)
+    assert network.action_snapshot()["battery:charge"][0] == pytest.approx(5.0)
+
+
+def test_reference_and_elapsed_budget_survive_repeated_extensions() -> None:
+    from custom_components.haeo_homusman.coordinator.plan_acceptance import elapsed_corrections, extend_reference
+
+    original = {"battery:discharge": (1.0, 2.0), "battery:charge": (0.0, 0.0)}
+    corrected = {"battery:discharge": (0.9, 2.1), "battery:charge": (0.0, 0.0)}
+    used = elapsed_corrections((0., 3600., 7200.), corrected, original, 1800., {})
+    assert used["battery"] == pytest.approx(0.05)
+    next_actions = {"battery:discharge": (0.9, 2.1, 3.0), "battery:charge": (0.0, 0.0, 0.0)}
+    reference = extend_reference((1800., 3600., 7200., 9000.), (0., 3600., 7200.), original, next_actions)
+    assert reference["battery:discharge"] == (1.0, 2.0, 3.0)
+    total = elapsed_corrections((1800., 3600., 7200., 9000.), next_actions, reference, 7200., used)
+    assert total["battery"] == pytest.approx(0.2)
+
+
 def test_broad_conflict_reports_a_feasible_commitment_adjustment(monkeypatch) -> None:
     from custom_components.haeo_homusman.core.model import network
     from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError, RowLabel

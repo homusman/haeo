@@ -1,6 +1,7 @@
 """Bounded hub-local history and authenticated, read-only plan retrieval."""
 
 from asyncio import Lock
+from bisect import bisect_right
 from datetime import UTC, datetime
 from pathlib import Path
 import json
@@ -25,6 +26,54 @@ _LOGGER = logging.getLogger(__name__)
 MAX_BYTES = 8 * 1024 * 1024
 MAX_PLAN_BYTES = 512 * 1024
 PAGE_SIZE = 32
+MAX_REVISIONS = 128
+MAX_EXECUTION_POINTS = 2048
+
+
+def revision_changes(plan: "CoordinatorData") -> dict[str, list[list[float]]]:
+    """Store changed intervals as start, end, original kW and corrected kW."""
+    result = {}
+    for name, values in (plan.actions or {}).items():
+        rows = []
+        for index, value in enumerate(values):
+            reference = plan.reference_actions[name][index]
+            if abs(value - reference) <= 1e-6:
+                continue
+            start, end = plan.boundaries[index:index + 2]
+            if rows and rows[-1][1] == start and rows[-1][2:] == [reference, value]:
+                rows[-1][1] = end
+            else:
+                rows.append([start, end, reference, value])
+        if rows:
+            result[name] = rows
+    return result
+
+
+def append_execution(target: dict, source: dict, start: float, end: float, linear: bool = False) -> bool:
+    """Append only the portion of a published schedule that elapsed."""
+    if end <= start:
+        return False
+    truncated = False
+    for name, fields in source.items():
+        for field, points in fields.items():
+            if not points:
+                continue
+            times = [point[0] for point in points]
+            def at(time: float) -> float:
+                index = max(0, bisect_right(times, time) - 1)
+                value = points[index][1]
+                if linear and index + 1 < len(points):
+                    next_time, next_value = points[index + 1]
+                    value += (next_value - value) * (time - times[index]) / (next_time - times[index])
+                return value
+            samples = [[start, at(start)], *[point for point in points if start < point[0] < end], [end, at(end)]]
+            saved = target.setdefault(name, {}).setdefault(field, [])
+            if saved and saved[-1][0] == start:
+                saved.pop()
+            saved.extend(samples)
+            truncated |= len(saved) > MAX_EXECUTION_POINTS
+            del saved[:-MAX_EXECUTION_POINTS]
+    return truncated
 
 
 def input_forecasts(hass: HomeAssistant, entry_id: str) -> dict:
@@ -100,7 +149,10 @@ class PlanHistory:
             except (OSError, ValueError, KeyError):
                 _LOGGER.exception("Could not load archived HAEO plans")
             self.loaded = True
-    async def record(self, plan: "CoordinatorData", decision: dict, accepted: bool) -> None:
+    async def record(
+        self, plan: "CoordinatorData", decision: dict, accepted: bool, *,
+        previous: "CoordinatorData | None" = None, active: "CoordinatorData | None" = None,
+    ) -> None:
         """Keep the candidate in memory and archive gated acceptance transitions."""
         async with self.lock:
             await self.load()
@@ -109,6 +161,60 @@ class PlanHistory:
             self.latest = record if size else None
             cutoff = plan.boundaries[0] - (plan.boundaries[-1] - plan.boundaries[0])
             pruned = self.prune(cutoff)
+            if previous is not None and self.accepted:
+                archived = self.accepted[-1]
+                if archived["generated_at"] == previous.completed_at.astimezone(UTC).isoformat():
+                    start, end = previous.boundaries[0], min(plan.boundaries[0], previous.boundaries[-1])
+                    previous_record = plan_record(previous, {})
+                    for name, devices in previous.outputs.items():
+                        for outputs in devices.values():
+                            for key, output in outputs.items():
+                                points = previous_record["series"].get(name, {}).get(key)
+                                if points:
+                                    truncated = append_execution(
+                                        archived.setdefault("execution_series", {}),
+                                        {name: {key: points}}, start, end, linear=output.unit == "%",
+                                    )
+                                    archived["execution_truncated"] = archived.get("execution_truncated", False) or truncated
+                    truncated = append_execution(
+                        archived.setdefault("execution_inputs", {}), previous_record["inputs"], start, end,
+                    )
+                    archived["execution_truncated"] = archived.get("execution_truncated", False) or truncated
+                    archived["execution_until"] = end
+                    if active is not None and not accepted:
+                        archived["active_ends"] = active.boundaries[-1]
+                        archived["revision"] = active.revision
+                        if active.revision != previous.revision:
+                            revisions = archived.setdefault("revisions", [])
+                            revisions.append({
+                                "revision": active.revision, "at": plan.started_at.isoformat(),
+                                "energy_used": active.correction_energy_used,
+                                "corrections": active.corrections,
+                                "changes": revision_changes(active),
+                                "benefit": decision.get("benefit"),
+                            })
+                            if len(revisions) > MAX_REVISIONS:
+                                archived["revisions_truncated"] = True
+                            del revisions[:-MAX_REVISIONS]
+                    # Bound traces independently of the immutable acceptance snapshot.
+                    while len(json.dumps(archived, separators=(",", ":")).encode()) > MAX_PLAN_BYTES:
+                        if len(archived.get("revisions", [])) > 1:
+                            archived["revisions"].pop(0)
+                            archived["revisions_truncated"] = True
+                            continue
+                        traces = [
+                            points for key in ("execution_series", "execution_inputs")
+                            for fields in archived.get(key, {}).values() for points in fields.values() if points
+                        ]
+                        if not traces:
+                            archived.pop("revisions", None)
+                            archived["revisions_truncated"] = True
+                            break
+                        for points in traces:
+                            del points[:max(1, len(points) // 2)]
+                        archived["execution_truncated"] = True
+                    archived["size"] = len(json.dumps(archived, separators=(",", ":")).encode())
+                    pruned = True
             if decision["reason"] == "gate_disabled":
                 if self.accepted and not self.accepted[-1].get("ended_at"):
                     self.accepted[-1]["ended_at"] = datetime.now(UTC).isoformat()
@@ -119,6 +225,7 @@ class PlanHistory:
                 self.prune(cutoff)
                 pruned = True
             if pruned:
+                self.prune(cutoff)
                 await self.save()
 
     @staticmethod
@@ -139,7 +246,7 @@ class PlanHistory:
         count = len(self.accepted)
         while self.accepted:
             oldest = self.accepted[0]
-            end = oldest["boundaries"][-1]
+            end = oldest.get("active_ends", oldest["boundaries"][-1])
             if closed := oldest.get("ended_at"):
                 end = min(end, datetime.fromisoformat(closed).timestamp())
             if len(self.accepted) > 1:
@@ -226,7 +333,10 @@ async def plans_response(history: PlanHistory, decision: dict, msg: dict) -> dic
             "id": record["id"],
             "accepted_at": record["accepted_at"],
             "ended_at": record.get("ended_at"),
-            "ends": record["boundaries"][-1],
+            "ends": record.get("active_ends", record["boundaries"][-1]),
+            "revision": record.get("revision", 0),
+            "execution_until": record.get("execution_until"),
+            "execution_truncated": record.get("execution_truncated", False),
             "decision": record["decision"],
         }
         for record in reversed(history.accepted)

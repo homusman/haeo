@@ -117,6 +117,16 @@ it("loads the pinned tariff from its archived input instead of a live tariff", (
   const [archived] = archivedSeries([source], hass, detail);
   expect(Array.from(archived!.times)).toEqual([10000, 20000]);
   expect(Array.from(archived!.values)).toEqual([0.3, 0.4]);
+  const revised = {
+    ...detail,
+    execution_until: 15,
+    execution_inputs: { Grid: { "pricing.import": [[10, 0.5], [15, 0.6]] as [number, number][] } },
+  };
+  const [followed] = archivedSeries([source], hass, revised, undefined, undefined, true);
+  expect(Array.from(followed!.values)).toEqual([0.5, 0.6]);
+  expect(Array.from(followed!.times)).toEqual([10000, 15000]);
+  const [snapshot] = archivedSeries([source], hass, revised);
+  expect(Array.from(snapshot!.values)).toEqual([0.3, 0.4]);
   expect(archivedSeries([source], hass, { ...summary, boundaries: [10, 20], series: {} })).toEqual([]);
 });
 

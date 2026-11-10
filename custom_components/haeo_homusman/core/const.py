@@ -13,6 +13,10 @@ CONF_DEBOUNCE_SECONDS: Final = "debounce_seconds"
 CONF_RELAX_INFEASIBLE: Final = "relax_infeasible"
 CONF_PLAN_ACCEPTANCE_THRESHOLD: Final = "plan_acceptance_threshold"
 CONF_PLAN_GATE_ENABLED: Final = "plan_gate_enabled"
+CORRECTION_NUMERIC_OPTIONS: Final = {
+    "plan_correction_power_kw": (0.1, 0.0, 10.0),
+    "plan_correction_energy_kwh": (0.25, 0.0, 20.0),
+}
 CONF_SPIKE_SUPPRESSION_ENABLED: Final = "spike_suppression_enabled"
 TARIFF_NUMERIC_OPTIONS: Final = {
     "confidence_midpoint_hours": (12.0, 0.0, 168.0),

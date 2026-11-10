@@ -51,7 +51,7 @@ export const HistoryLayer = observer(function HistoryLayer({
       {store.segments.map(({ plan, start, end }) => {
         const detail = store.historyDetails[plan.id];
         if (!detail) return null;
-        const series = archivedSeries(visible, store.hass, detail, Math.max(min, start), Math.min(max, end));
+        const series = archivedSeries(visible, store.hass, detail, Math.max(min, start), Math.min(max, end), true);
         if (!series.length) return null;
         const shapes = store.pathsForSeries(series);
         return (

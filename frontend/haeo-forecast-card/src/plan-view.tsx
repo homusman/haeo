@@ -13,6 +13,9 @@ export interface PlanSummary {
   accepted_at: string;
   ended_at: string | null;
   ends: number;
+  revision?: number;
+  execution_until?: number | null;
+  execution_truncated?: boolean;
   decision: {
     reason: string;
     benefit: number | null;
@@ -30,6 +33,9 @@ export interface CurrentPlanMetadata {
   accepted_at: string;
   ends: number;
   rolling_cost?: number;
+  revision?: number;
+  correction_energy_used?: Record<string, number>;
+  corrections?: Record<string, { power_kw: number; energy_kwh: number }> | null;
   decision: PlanSummary["decision"];
 }
 
@@ -38,6 +44,8 @@ export interface PlanDetail extends PlanSummary {
   boundaries: number[];
   inputs?: Record<string, Record<string, [number, number][]>>;
   series: Record<string, Record<string, [number, number][]>>;
+  execution_series?: Record<string, Record<string, [number, number][]>>;
+  execution_inputs?: Record<string, Record<string, [number, number][]>>;
 }
 
 export interface PlanSegment {
@@ -143,7 +151,11 @@ export const PlanControls = observer(function PlanControls({
         } while (past && before && plans.length < 256);
         const segments = past ? historicSegments(plans, now).filter((segment) => segment.end > cutoff) : [];
         store.setSegments(segments);
-        const ids = segments.map((segment) => segment.plan.id).filter((id) => !store.historyDetails[id]);
+        const ids = segments.filter(({ plan }) => {
+          const detail = store.historyDetails[plan.id];
+          return !detail || (detail.execution_until ?? null) !== (plan.execution_until ?? null)
+            || (detail.revision ?? 0) !== (plan.revision ?? 0);
+        }).map(({ plan }) => plan.id);
         for (let start = 0; start < ids.length && !cancelled; start += 4) {
           const details = await Promise.allSettled(
             ids.slice(start, start + 4).map((id) => hass.callWS!<PlanDetail>({ ...message, plan_id: id }))
@@ -312,6 +324,13 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
             <div>Accepted {new Date(current.accepted_at).toLocaleString()}</div>
             <div>Horizon ends {new Date(current.ends * 1000).toLocaleString()}</div>
             <div>Rolling cost {current.rolling_cost?.toFixed(3) ?? "—"}</div>
+            <div>Revision {current.revision ?? 0}</div>
+            {Object.entries(current.correction_energy_used ?? {}).map(([name, energy]) => (
+              <div key={name}>{name} elapsed correction {energy.toFixed(3)} kWh</div>
+            ))}
+            {Object.entries(current.corrections ?? {}).map(([name, correction]) => (
+              <div key={name}>{name} correction {correction.power_kw.toFixed(3)} kW peak · {correction.energy_kwh.toFixed(3)} kWh total</div>
+            ))}
             <div>{current.decision.reason.replaceAll("_", " ")}</div>
             {current.decision.conflicts && <div>Conflicting constraints: {current.decision.conflicts}</div>}
           </>
@@ -343,6 +362,8 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
       <strong>Plan {index === 0 ? "latest" : index}</strong>
       <div>{new Date(start).toLocaleString()}</div>
       <div>In action {Math.round((end - start) / 60_000)} min</div>
+      <div>{plan.revision ?? 0} schedule revisions · comparison shows original acceptance</div>
+      {plan.execution_truncated && <div>Older revision trace points were pruned to bound archive storage.</div>}
       <div>{reasons[plan.decision.reason] ?? plan.decision.reason.replaceAll("_", " ")}</div>
       {plan.decision.conflicts && <div>Conflicting constraints: {plan.decision.conflicts}</div>}
       {nextCost !== undefined && <div>Saved plan cost {nextCost.toFixed(3)}</div>}

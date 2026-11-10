@@ -349,11 +349,22 @@ class Network:
                 costs[name, ""] = costs.get((name, ""), 0.0) + float(delta)
         return costs
 
-    def optimize_incumbent(self, actions: Mapping[str, tuple[float, ...]]) -> float:
+    def optimize_incumbent(
+        self, actions: Mapping[str, tuple[float, ...]], *,
+        correction_power: float = 0.0, correction_energy: float = 0.0,
+        energy_used: Mapping[str, float] | None = None,
+    ) -> float:
         """Solve a disposable network with the overlapping schedule fixed."""
-        return self.optimize(committed_actions=actions)
+        return self.optimize(
+            committed_actions=actions, correction_power=correction_power,
+            correction_energy=correction_energy, energy_used=energy_used,
+        )
 
-    def optimize(self, *, committed_actions: Mapping[str, tuple[float, ...]] | None = None) -> float:
+    def optimize(
+        self, *, committed_actions: Mapping[str, tuple[float, ...]] | None = None,
+        correction_power: float = 0.0, correction_energy: float = 0.0,
+        energy_used: Mapping[str, float] | None = None,
+    ) -> float:
         """Solve the optimization problem and return the primary objective value.
 
         The plan has the lowest cost and, among equally cheap plans, the lowest
@@ -379,12 +390,38 @@ class Network:
                 raise ValueError(msg) from e
 
         commitment_labels: dict[int, RowLabel] = {}
+        correction_terms: list[LinearArray] = []
         if committed_actions is not None:
             series = self._action_series()
+            battery_actions = {
+                f"{name}:{direction}": name
+                for name, element in self.elements.items() if isinstance(element, Battery)
+                for direction in ("charge", "discharge")
+            }
+            deviations: dict[str, list[LinearArray]] = {}
             for name, actions in committed_actions.items():
+                if name in battery_actions and correction_power > 0 and correction_energy > 0:
+                    deviation = h.add_variables(len(actions), name=f"{name}.correction")
+                    delta = series[name][:len(actions)] - np.asarray(actions)
+                    for rowspec in (delta <= deviation, -delta <= deviation):
+                        rows, _ = add_rows(h, rowspec)
+                        for period, row in enumerate(rows):
+                            commitment_labels[int(row)] = RowLabel(name, "correction from accepted power", period)
+                    deviations.setdefault(battery_actions[name], []).append(deviation)
+                    continue
                 for period, action in enumerate(actions):
                     rows, _ = add_rows(h, series[name][period] == action)
                     commitment_labels[int(rows[0])] = RowLabel(name, f"held power {action:g} kW", period)
+            for name, directions in deviations.items():
+                deviation = LinearArray.sum_of(directions)
+                rows, _ = add_rows(h, deviation <= correction_power)
+                for period, row in enumerate(rows):
+                    commitment_labels[int(row)] = RowLabel(name, f"correction limit {correction_power:g} kW", period)
+                energy = (deviation * self.periods[:len(deviation)]).total()
+                remaining = max(0.0, correction_energy - (energy_used or {}).get(name, 0.0))
+                rows, _ = add_rows(h, energy <= remaining)
+                commitment_labels[int(rows[0])] = RowLabel(name, f"remaining correction budget {remaining:g} kWh", None)
+                correction_terms.append(energy)
         primary, secondary = self.cost()
         if primary is None:
             msg = "Network has no primary cost — add pricing to connections or nodes"
@@ -400,6 +437,20 @@ class Network:
         self.conflicts = ()
         self.relaxations = ()
         try:
+            if correction_terms:
+                correction = LinearArray.sum_of(correction_terms)
+                _set_objective(h, all_col_indices, Objective.of(correction, n_vars))
+                h.run()
+                status = h.getModelStatus()
+                if status == HighsModelStatus.kUnboundedOrInfeasible:
+                    status = _status_without_presolve(h)
+                if status == HighsModelStatus.kInfeasible:
+                    raise InfeasibleError
+                if status != HighsModelStatus.kOptimal:
+                    raise SolverError(h.modelStatusToString(status))
+                minimum = float(correction.value(h.column_values()).item())
+                rows, _ = add_rows(h, correction <= minimum + 1e-8)
+                commitment_labels[int(rows[0])] = RowLabel("Schedule", "minimum necessary correction", None)
             return self._solve(all_col_indices, objectives)
         except InfeasibleError:
             balance_rows = {
@@ -411,7 +462,7 @@ class Network:
             labels = row_labels(self.constraints(), self.n_periods, balance_rows)
             labels.update(commitment_labels)
             self.conflicts = conflicting_rows(h, labels, include_bounds=committed_actions is not None)
-            if commitment_labels and (not self.conflicts or len(self.conflicts) > MAX_LISTED_ROWS):
+            if commitment_labels and not correction_terms and (not self.conflicts or len(self.conflicts) > MAX_LISTED_ROWS):
                 weights = np.full(h.getNumRow(), -1.0)
                 for row, label in commitment_labels.items():
                     assert label.period is not None

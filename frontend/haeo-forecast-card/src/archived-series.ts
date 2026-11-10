@@ -4,17 +4,21 @@ import type { ForecastSeries } from "./types";
 
 export type Point = [number, number];
 
-function planPoints(name: string | undefined, field: unknown, plan: PlanDetail, series: ForecastSeries): Point[] {
+function planPoints(
+  name: string | undefined, field: unknown, plan: PlanDetail, series: ForecastSeries, execution: boolean
+): Point[] {
+  const outputs = execution && plan.execution_series !== undefined ? plan.execution_series : plan.series;
+  const inputs = execution && plan.execution_inputs !== undefined ? plan.execution_inputs : plan.inputs;
   const points =
     name === undefined
       ? undefined
       : typeof field === "string"
-        ? plan.inputs?.[name]?.[field]
-        : plan.series[name]?.[series.outputName];
+        ? inputs?.[name]?.[field]
+        : outputs[name]?.[series.outputName];
   if (!points?.length) return [];
   const result: Point[] = points.map(([time, value]) => [time * 1000, Number(value)]);
   const last = result.at(-1)!;
-  const end = plan.boundaries.at(-1)! * 1000;
+  const end = (execution && plan.execution_until != null ? plan.execution_until : plan.boundaries.at(-1)!) * 1000;
   if (series.drawType === "step" && last[0] < end) result.push([end, last[1]]);
   return result;
 }
@@ -39,12 +43,13 @@ export function archivedSeries(
   hass: HassLike | null,
   plan: PlanDetail,
   from?: number,
-  to?: number
+  to?: number,
+  execution = false
 ): ForecastSeries[] {
   return series.flatMap((item) => {
     const attrs = hass?.states[item.entityId]?.attributes;
     const name = attrs?.["element_name"];
-    const raw = planPoints(typeof name === "string" ? name : undefined, attrs?.["field_path"], plan, item);
+    const raw = planPoints(typeof name === "string" ? name : undefined, attrs?.["field_path"], plan, item, execution);
     const points =
       from === undefined || to === undefined ? raw : clipPlanPoints(raw, from, to, item.drawType === "line");
     if (points.length < 2) return [];

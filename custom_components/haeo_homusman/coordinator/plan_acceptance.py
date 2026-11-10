@@ -147,6 +147,66 @@ class PlanAssessment:
     gate_candidate_cost: float | None = None
 
 
+def elapsed_corrections(
+    boundaries: Sequence[float], actions: Mapping[str, tuple[float, ...]],
+    reference: Mapping[str, tuple[float, ...]], until: float, used: Mapping[str, float],
+) -> dict[str, float]:
+    """Charge elapsed absolute deviations once to the acceptance's lifetime budget."""
+    result = dict(used)
+    hours = np.maximum(0, np.minimum(boundaries[1:], until) - np.asarray(boundaries[:-1])) / 3600
+    for name, values in actions.items():
+        battery, _, direction = name.rpartition(":")
+        if direction in ("charge", "discharge"):
+            energy = float(np.dot(np.abs(np.asarray(values) - reference[name]), hours))
+            result[battery] = result.get(battery, 0.0) + energy
+    return result
+
+
+def extend_reference(
+    boundaries: Sequence[float], previous_boundaries: Sequence[float],
+    previous: Mapping[str, tuple[float, ...]], actions: Mapping[str, tuple[float, ...]],
+) -> dict[str, tuple[float, ...]]:
+    """Keep the original reference over the overlap and anchor each new tail once."""
+    return {
+        name: tuple(
+            previous[name][bisect_right(previous_boundaries, at) - 1] if at < previous_boundaries[-1] else value
+            for at, value in zip(boundaries[:-1], values, strict=True)
+        )
+        for name, values in actions.items()
+    }
+
+
+def schedule_changed(
+    boundaries: Sequence[float], actions: Mapping[str, tuple[float, ...]],
+    previous_boundaries: Sequence[float], previous: Mapping[str, tuple[float, ...]],
+) -> bool:
+    """Identify a revision over the shared horizon, excluding newly appended tail periods."""
+    return any(
+        abs(value - previous[name][bisect_right(previous_boundaries, at) - 1]) > 1e-6
+        for name, values in actions.items()
+        for at, value in zip(boundaries[:-1], values, strict=True)
+        if previous_boundaries[0] <= at < previous_boundaries[-1]
+    )
+
+
+def correction_summary(
+    boundaries: Sequence[float], actions: Mapping[str, tuple[float, ...]],
+    reference: Mapping[str, tuple[float, ...]], used: Mapping[str, float],
+) -> dict[str, dict[str, float]]:
+    """Summarize per-battery power deviation and lifetime energy commitments."""
+    deviations: dict[str, NDArray[np.float64]] = {}
+    for name, values in actions.items():
+        battery, _, direction = name.rpartition(":")
+        if direction in ("charge", "discharge"):
+            delta = np.abs(np.asarray(values) - reference[name])
+            deviations[battery] = deviations.get(battery, np.zeros(len(values))) + delta
+    hours = np.diff(boundaries) / 3600
+    return {
+        battery: {"power_kw": float(np.max(delta)), "energy_kwh": used.get(battery, 0.0) + float(np.dot(delta, hours))}
+        for battery, delta in deviations.items()
+    }
+
+
 def assess_plan(
     configs: dict[str, ElementConfigData],
     periods: Sequence[float],
@@ -158,6 +218,9 @@ def assess_plan(
     threshold: float,
     candidate: Network | None = None,
     weights: TariffWeights | None = None,
+    correction_power: float = 0.0,
+    correction_energy: float = 0.0,
+    energy_used: Mapping[str, float] | None = None,
 ) -> PlanAssessment:
     """Keep the old controllable schedule throughout the overlap and optimize only the tail."""
     if not previous_actions or actions.keys() != previous_actions.keys():
@@ -173,7 +236,10 @@ def assess_plan(
     committed = {name: tuple(values[index] for index in indices) for name, values in previous_actions.items()}
     network = build_network("incumbent", configs, periods, relax_infeasible=False)
     try:
-        benchmark = network.optimize_incumbent(committed)
+        benchmark = network.optimize_incumbent(
+            committed, correction_power=correction_power,
+            correction_energy=correction_energy, energy_used=energy_used,
+        )
     except InfeasibleError as error:
         return PlanAssessment("incumbent_infeasible", conflicts=error.conflicts)
     benefit = benchmark - cost

@@ -80,12 +80,16 @@
               "spike_scale_cents_per_kwh": "Spike scale (cents/kWh)",
               "max_spike_suppression": "Maximum spike suppression (0–1)",
               "plan_gate_enabled": "Enable rolling plan acceptance gate",
+              "plan_correction_power_kw": "Maximum battery schedule correction (kW)",
+              "plan_correction_energy_kwh": "Battery correction energy budget per accepted plan (kWh)",
               "plan_acceptance_threshold": "Minimum modeled savings (currency units)",
               "record_forecasts": "Record forecast data",
               "relax_infeasible": "Relax impossible plans"
             },
             "data_description": {
               "forecast_confidence_enabled": "For plan acceptance, reduce distant tariff deviations and discount the value of energy at the end of the horizon. The optimiser uses the original forecasts.",
+              "plan_correction_power_kw": "Maximum combined charge and discharge adjustment per battery, relative to its original accepted schedule. Set either correction limit to zero for exact held powers.",
+              "plan_correction_energy_kwh": "Maximum cumulative absolute correction energy per battery, including elapsed corrections and the remaining horizon. It resets only when a new plan is accepted. Newly extended tail intervals establish their reference when first added.",
               "spike_suppression_enabled": "For plan acceptance, reduce larger tariff deviations farther into the forecast. The optimiser uses the original forecasts.",
               "confidence_midpoint_hours": "Lead time at the centre of the transition toward the minimum time weight.",
               "confidence_width_hours": "How gradual the transition is. Larger values spread the change over more hours.",
