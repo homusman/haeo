@@ -37,7 +37,9 @@ def test_initialize_then_optimize(enabled: bool) -> None:
             ),
             input_stores={},
         )
-        network = Mock(n_periods=1, relaxations=(), action_snapshot=Mock(return_value={}))
+        network = Mock(
+            n_periods=1, relaxations=(), action_snapshot=Mock(return_value={"battery:discharge": (0.0,)})
+        )
         coordinator._network = network
         coordinator._participant_configs = {}
         coordinator._stale_elements = set()
@@ -56,6 +58,7 @@ def test_initialize_then_optimize(enabled: bool) -> None:
             patch(f"{module}.serialize_topology", return_value={}),
             patch(f"{module}.evaluate_network_connectivity"),
             patch(f"{module}.build_optimization_context", return_value=Mock()),
+            patch(f"{module}.build_network", return_value=network),
             patch(f"{module}.input_forecasts", return_value={}),
             patch(f"{module}.time", Mock(time=Mock(return_value=30.0), monotonic=Mock(return_value=30.0))) as clock,
         ):
