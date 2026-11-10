@@ -54,36 +54,39 @@ def adjust_tariff(values: NDArray[np.float64], boundaries: Sequence[float], sett
     for index, center in enumerate(centers):
         weights = np.exp(-np.abs(centers - center) / (settings.tariff_baseline_hours * 3600)) * durations
         baseline[index] = np.average(values, weights=weights)
-    hours = (starts - starts[0]) / 3600
-    logistic = 1 / (1 + np.exp(np.clip(
-        (hours - settings.confidence_midpoint_hours) / settings.confidence_width_hours, -700, 700
-    )))
-    confidence = settings.confidence_floor + (1 - settings.confidence_floor) * logistic / logistic[0]
+    retention = tariff_retention((starts - starts[0]) / 3600, settings)
+    confidence = settings.confidence_floor + (1 - settings.confidence_floor) * retention
     deviation = values - baseline
     weight = confidence if settings.time_enabled else np.ones_like(values)
     if settings.spike_enabled:
         spike = -np.expm1(-np.square(deviation * 100 / settings.spike_scale_cents_per_kwh))
-        attenuation = 1 - confidence if settings.time_enabled else 1 - logistic / logistic[0]
+        attenuation = 1 - confidence if settings.time_enabled else 1 - retention
         weight = weight * (1 - settings.max_spike_suppression * attenuation * spike)
     result = baseline + weight * deviation
     result[0] = values[0]
     return result
 
 
-def adjust_grid_prices(
+def tariff_retention(hours: NDArray[np.float64], settings: TariffWeights) -> NDArray[np.float64]:
+    """Return the time curve normalized at the start of the horizon."""
+    logistic = 1 / (1 + np.exp(np.clip(
+        (hours - settings.confidence_midpoint_hours) / settings.confidence_width_hours, -700, 700
+    )))
+    return logistic / logistic[0]
+
+
+def grid_tariff_adjustments(
     configs: dict[str, ElementConfigData], boundaries: Sequence[float], settings: TariffWeights
-) -> dict[str, ElementConfigData]:
-    """Transform import and export independently, leaving scalar tariffs intact."""
-    adjusted = configs.copy()
+) -> dict[str, NDArray[np.float64]]:
+    """Return signed price changes for scoring solved grid flows."""
+    adjusted = {}
     for name, config in configs.items():
         if config["element_type"] != ElementType.GRID:
             continue
-        pricing = config["pricing"].copy()
-        for direction in ("price_source_target", "price_target_source"):
-            values = pricing[direction]
+        for direction, field, sign in (("import", "price_source_target", 1), ("export", "price_target_source", -1)):
+            values = config["pricing"][field]
             if isinstance(values, np.ndarray):
-                pricing[direction] = adjust_tariff(values, boundaries, settings)
-        adjusted[name] = {**config, "pricing": pricing}
+                adjusted[f"{name}:{direction}"] = sign * (adjust_tariff(values, boundaries, settings) - values)
     return adjusted
 
 
@@ -139,6 +142,9 @@ class PlanAssessment:
     continuation: Network | None = None
     conflicts: tuple[RowLabel, ...] = ()
     benefit_drivers: str | None = None
+    benefit: float | None = None
+    gate_incumbent_cost: float | None = None
+    gate_candidate_cost: float | None = None
 
 
 def assess_plan(
@@ -151,6 +157,7 @@ def assess_plan(
     previous_actions: Mapping[str, tuple[float, ...]] | None,
     threshold: float,
     candidate: Network | None = None,
+    weights: TariffWeights | None = None,
 ) -> PlanAssessment:
     """Keep the old controllable schedule throughout the overlap and optimize only the tail."""
     if not previous_actions or actions.keys() != previous_actions.keys():
@@ -169,13 +176,33 @@ def assess_plan(
         benchmark = network.optimize_incumbent(committed)
     except InfeasibleError as error:
         return PlanAssessment("incumbent_infeasible", conflicts=error.conflicts)
-    if benchmark - cost > threshold:
-        drivers = None
-        if candidate is not None:
-            old_costs = network.primary_cost_by_element()
-            new_costs = candidate.primary_cost_by_element()
-            changes = [(name, old - new_costs.get(name, 0.0)) for name, old in old_costs.items()]
-            largest = sorted(changes, key=lambda change: abs(change[1]), reverse=True)[:3]
-            drivers = ", ".join(f"{name} {amount:+.3f}" for name, amount in largest if abs(amount) >= 0.001) or None
-        return PlanAssessment("accepted", benchmark, benefit_drivers=drivers)
-    return PlanAssessment("below_threshold", benchmark, network)
+    benefit = benchmark - cost
+    gate_old = gate_new = None
+    drivers = None
+    if candidate is not None:
+        adjustments = grid_tariff_adjustments(configs, boundaries, weights) if weights is not None else None
+        terminal_weight = 1.0
+        if weights is not None and weights.time_enabled:
+            hours = (boundaries[-1] - boundaries[0]) / 3600
+            retention = tariff_retention(np.array([0.0, hours]), weights)[1]
+            terminal_weight = weights.confidence_floor + (1 - weights.confidence_floor) * retention
+        old_costs = network.primary_cost_by_element(adjustments, terminal_weight)
+        new_costs = candidate.primary_cost_by_element(adjustments, terminal_weight)
+        if weights is not None:
+            gate_old, gate_new = sum(old_costs.values()), sum(new_costs.values())
+            benefit = gate_old - gate_new
+        changes = [(name, old - new_costs.get(name, 0.0)) for name, old in old_costs.items()]
+        largest = sorted(changes, key=lambda change: abs(change[1]), reverse=True)[:3]
+        drivers = ", ".join(
+            f"{' '.join(filter(None, label))} {amount:+.3f}" for label, amount in largest if abs(amount) >= 0.001
+        ) or None
+    accepted = benefit > threshold
+    return PlanAssessment(
+        "accepted" if accepted else "below_threshold",
+        benchmark,
+        None if accepted else network,
+        benefit_drivers=drivers,
+        benefit=benefit,
+        gate_incumbent_cost=gate_old,
+        gate_candidate_cost=gate_new,
+    )

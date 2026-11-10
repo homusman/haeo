@@ -85,8 +85,8 @@
               "relax_infeasible": "Relax impossible plans"
             },
             "data_description": {
-              "forecast_confidence_enabled": "Reduce deviations from the filtered tariff baseline farther into the forecast. The first interval keeps the original tariff.",
-              "spike_suppression_enabled": "Apply additional attenuation to larger tariff deviations. It increases farther into the forecast and leaves the first interval unchanged.",
+              "forecast_confidence_enabled": "For plan acceptance, reduce distant tariff deviations and discount the value of energy at the end of the horizon. The optimiser uses the original forecasts.",
+              "spike_suppression_enabled": "For plan acceptance, reduce larger tariff deviations farther into the forecast. The optimiser uses the original forecasts.",
               "confidence_midpoint_hours": "Lead time at the centre of the transition toward the minimum time weight.",
               "confidence_width_hours": "How gradual the transition is. Larger values spread the change over more hours.",
               "confidence_floor": "Minimum retained fraction of a distant tariff deviation before any additional spike suppression.",

@@ -18,6 +18,8 @@ export interface PlanSummary {
     benefit: number | null;
     candidate_cost?: number;
     incumbent_cost?: number | null;
+    gate_incumbent_cost?: number | null;
+    gate_candidate_cost?: number | null;
     benefit_drivers?: string | null;
     conflicts?: string | null;
     accepted?: boolean;
@@ -301,6 +303,7 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
             {candidate.decision.incumbent_cost != null && (
               <div>Retained plan repriced {candidate.decision.incumbent_cost.toFixed(3)}</div>
             )}
+            <GateScores decision={candidate.decision} />
             {candidate.decision.benefit_drivers && <div>Largest cost changes {candidate.decision.benefit_drivers}</div>}
             {candidate.decision.conflicts && <div>Conflicting constraints: {candidate.decision.conflicts}</div>}
           </>
@@ -346,6 +349,7 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
       {plan.decision.incumbent_cost != null && (
         <div>Previous plan repriced at acceptance {plan.decision.incumbent_cost.toFixed(3)}</div>
       )}
+      <GateScores decision={plan.decision} />
       {plan.decision.benefit_drivers && <div>Largest cost changes {plan.decision.benefit_drivers}</div>}
       {comparisonCost !== null && (
         <div>
@@ -360,3 +364,9 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
     </aside>
   );
 });
+
+function GateScores({ decision }: { decision: PlanSummary["decision"] }): JSX.Element | null {
+  const { gate_incumbent_cost: retained, gate_candidate_cost: candidate } = decision;
+  if (retained == null || candidate == null) return null;
+  return <div>Discounted gate costs · retained {retained.toFixed(3)} · candidate {candidate.toFixed(3)}</div>;
+}

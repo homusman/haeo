@@ -24,11 +24,11 @@ from custom_components.haeo_homusman.core.model.elements import (
 )
 
 
-def make_battery_network(periods=(1.0,), initial_charge=5.0):
+def make_battery_network(periods=(1.0,), initial_charge=5.0, capacity=10.0):
     network = Network(name="stability", periods=np.array(periods))
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_BATTERY,
-        "name": "battery", "capacity": 10.0, "initial_charge": initial_charge,
+        "name": "battery", "capacity": capacity, "initial_charge": initial_charge,
     })
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_NODE,
@@ -62,6 +62,33 @@ def test_incumbent_values_the_cost_of_holding_current_power() -> None:
     assert candidate.action_snapshot()["battery:discharge"][0] == pytest.approx(5.0)
     assert incumbent.optimize_incumbent({"battery:discharge": (0.0,), "battery:charge": (0.0,)}) - cost == pytest.approx(0.05)
     assert incumbent.action_snapshot()["battery:discharge"][0] == pytest.approx(0.0)
+
+
+def test_gate_scores_can_discount_terminal_energy_without_changing_the_solve(monkeypatch) -> None:
+    from custom_components.haeo_homusman.coordinator import plan_acceptance
+
+    candidate = make_battery_network(periods=(48.0,), capacity=5.0)
+    incumbent = make_battery_network(periods=(48.0,), capacity=5.0)
+    candidate.elements["battery"].salvage_value = 0.07
+    incumbent.elements["battery"].salvage_value = 0.07
+    monkeypatch.setattr(plan_acceptance, "build_network", lambda *args, **kwargs: incumbent)
+    raw_cost = candidate.optimize()
+    assert raw_cost == pytest.approx(-0.35)
+    actions = candidate.action_snapshot()
+    end = 48 * 3600
+    result = plan_acceptance.assess_plan(
+        {}, (end,), (0.0, end), actions, raw_cost, (0.0, end),
+        {"battery:discharge": (0.1,), "battery:charge": (0.0,)}, 0.02,
+        candidate, plan_acceptance.tariff_weights({
+            "forecast_confidence_enabled": True, "confidence_floor": 0.0,
+            "confidence_midpoint_hours": 6.0, "confidence_width_hours": 2.0,
+        }),
+    )
+    assert result.incumbent_cost - raw_cost == pytest.approx(0.288)
+    assert result.reason == "below_threshold"
+    assert result.benefit == pytest.approx(-0.048, abs=0.01)
+    assert "battery terminal energy" not in (result.benefit_drivers or "")
+    assert candidate.action_snapshot() == actions
 
 
 def test_incumbent_does_not_relax_an_impossible_action() -> None:
@@ -104,6 +131,23 @@ def test_confidence_preserves_current_price_and_shrinks_distant_spikes() -> None
     assert 0.8 < result[24] < 1.6
     assert result[-1] < 0
     assert values[24] == 2.0
+
+
+def test_grid_gate_adjustments_preserve_raw_prices_and_reverse_export_sign() -> None:
+    from custom_components.haeo_homusman.coordinator.plan_acceptance import grid_tariff_adjustments, tariff_weights
+    from custom_components.haeo_homusman.core.schema.elements import ElementType
+
+    prices = np.array([0.1, 0.1, 1.0])
+    configs = {"grid": {"element_type": ElementType.GRID, "pricing": {
+        "price_source_target": prices, "price_target_source": prices,
+    }}}
+    adjustments = grid_tariff_adjustments(
+        configs, (0.0, 3600.0, 36000.0, 39600.0), tariff_weights({"forecast_confidence_enabled": True})
+    )
+    assert adjustments["grid:import"][0] == 0.0
+    assert adjustments["grid:import"][-1] < 0.0
+    np.testing.assert_allclose(adjustments["grid:export"], -adjustments["grid:import"])
+    np.testing.assert_allclose(prices, [0.1, 0.1, 1.0])
 
 
 @pytest.mark.parametrize(

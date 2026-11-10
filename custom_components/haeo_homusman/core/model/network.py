@@ -330,14 +330,24 @@ class Network:
         solution = self._solver.column_values()
         return {name: tuple(map(float, power.value(solution))) for name, power in self._action_series().items()}
 
-    def primary_cost_by_element(self) -> dict[str, float]:
-        """Evaluate each element's contribution to the solved primary objective."""
+    def primary_cost_by_element(
+        self, tariff_adjustments: Mapping[str, NDArray[np.float64]] | None = None, terminal_weight: float = 1.0
+    ) -> dict[tuple[str, str], float]:
+        """Score a solved schedule with optional gate-only price and terminal adjustments."""
         solution = self._solver.column_values()
-        return {
-            name: float(cost.value(solution).item())
-            for name, element in self.elements.items()
-            if (cost := element.cost()) is not None
-        }
+        costs: dict[tuple[str, str], float] = {}
+        for name, element in self.elements.items():
+            if isinstance(element, Battery):
+                costs[name, "SoC limits"] = float(element.battery_charge_limit_cost().value(solution).item())
+                costs[name, "terminal energy"] = (
+                    float(element.battery_salvage_value().value(solution).item()) * terminal_weight
+                )
+            elif (cost := element.cost()) is not None:
+                costs[name, ""] = float(cost.value(solution).item())
+            if tariff_adjustments is not None and name in tariff_adjustments and isinstance(element, Connection):
+                delta = np.dot(element.total_power_in.value(solution) * self.periods, tariff_adjustments[name])
+                costs[name, ""] = costs.get((name, ""), 0.0) + float(delta)
+        return costs
 
     def optimize_incumbent(self, actions: Mapping[str, tuple[float, ...]]) -> float:
         """Solve a disposable network with the overlapping schedule fixed."""

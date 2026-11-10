@@ -81,7 +81,7 @@ from custom_components.haeo_homusman.repairs import (
 from custom_components.haeo_homusman.services import async_save_diagnostics
 from custom_components.haeo_homusman.util import network_subentry
 
-from .plan_acceptance import THRESHOLD, PlanAssessment, adjust_grid_prices, assess_plan, refine_configs, rolling_boundaries, tariff_weights
+from .plan_acceptance import THRESHOLD, PlanAssessment, assess_plan, refine_configs, rolling_boundaries, tariff_weights
 from .plan_history import PlanHistory, input_forecasts
 from .network import evaluate_network_connectivity
 
@@ -793,8 +793,6 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
         )
         gate = advanced.get(CONF_PLAN_GATE_ENABLED, False)
         threshold = float(advanced.get(CONF_PLAN_ACCEPTANCE_THRESHOLD, THRESHOLD))
-        if confidence:
-            loaded_configs = adjust_grid_prices(loaded_configs, forecast_timestamps, tariff_weights(advanced))
 
         _LOGGER.debug("Running optimization with %d participants", len(loaded_configs))
 
@@ -823,7 +821,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             network = self.network
             if network.n_periods == len(periods_seconds):
                 network.update_periods(periods_in_hours(periods_seconds))
-                for element_name in loaded_configs if confidence else self._stale_elements:
+                for element_name in self._stale_elements:
                     self._element_updaters[element_name](loaded_configs[element_name])
             else:
                 network = self._build_network(loaded_configs)
@@ -863,6 +861,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 previous.actions if previous else None,
                 threshold,
                 network,
+                tariff_weights(advanced) if confidence else None,
             )
         benchmark = assessment.incumbent_cost
         accepted = assessment.continuation is None
@@ -883,7 +882,9 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "candidate_cost": cost,
             "incumbent_cost": benchmark,
             "benefit_drivers": assessment.benefit_drivers,
-            "benefit": None if benchmark is None else benchmark - cost,
+            "benefit": assessment.benefit,
+            "gate_incumbent_cost": assessment.gate_incumbent_cost,
+            "gate_candidate_cost": assessment.gate_candidate_cost,
             "threshold": threshold if gate else 0.0,
             "conflicts": conflict,
         }
