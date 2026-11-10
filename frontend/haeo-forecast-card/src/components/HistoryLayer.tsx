@@ -20,7 +20,7 @@ function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[])
     const points = actualPoints(store, series, true);
     if (points.length < 2) continue;
     sources.add(key);
-    const group = JSON.stringify([series.elementType, series.unit]);
+    const group = series.unit;
     const traces = groups.get(group) ?? [];
     traces.push({ series, points });
     groups.set(group, traces);
@@ -29,7 +29,8 @@ function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[])
   const y = (power: number) => store.yScalePower(power);
   return [...groups.values()].flatMap((traces) => {
     const times = [...new Set(traces.flatMap(({ points }) => points.map(([time]) => time)))].sort((a, b) => a - b);
-    const stack = new Float64Array(times.length);
+    const production = new Float64Array(times.length);
+    const consumption = new Float64Array(times.length);
     return traces.map(({ series, points }) => {
       let cursor = -1;
       let start = 0;
@@ -55,6 +56,7 @@ function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[])
           start = index + 1;
           continue;
         }
+        const stack = value >= 0 ? production : consumption;
         lower[index] = store.powerDisplayMode === "opposed" ? stack[index]! : 0;
         upper[index] = lower[index]! + value;
         stack[index] = upper[index]!;

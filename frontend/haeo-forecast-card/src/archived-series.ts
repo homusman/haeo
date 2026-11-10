@@ -7,19 +7,22 @@ export type Point = [number, number];
 function planPoints(
   name: string | undefined, field: unknown, plan: PlanDetail, series: ForecastSeries, execution: boolean
 ): Point[] {
-  const outputs = execution && plan.execution_series !== undefined ? plan.execution_series : plan.series;
-  const inputs = execution && plan.execution_inputs !== undefined ? plan.execution_inputs : plan.inputs;
-  const points =
-    name === undefined
-      ? undefined
-      : typeof field === "string"
-        ? inputs?.[name]?.[field]
-        : outputs[name]?.[series.outputName];
+  if (name === undefined) return [];
+  const original = typeof field === "string" ? plan.inputs?.[name]?.[field] : plan.series[name]?.[series.outputName];
+  const followed = execution
+    ? typeof field === "string" ? plan.execution_inputs?.[name]?.[field] : plan.execution_series?.[name]?.[series.outputName]
+    : undefined;
+  const points = followed?.length ? followed : original;
   if (!points?.length) return [];
   const result: Point[] = points.map(([time, value]) => [time * 1000, Number(value)]);
   const last = result.at(-1)!;
-  const end = (execution && plan.execution_until != null ? plan.execution_until : plan.boundaries.at(-1)!) * 1000;
+  const end = (followed?.length && plan.execution_until != null ? plan.execution_until : plan.boundaries.at(-1)!) * 1000;
   if (series.drawType === "step" && last[0] < end) result.push([end, last[1]]);
+  if (followed?.length && original?.length && !plan.execution_truncated) {
+    const firstFollowed = followed[0]![0];
+    const prefix = original.filter(([time]) => time < firstFollowed);
+    return [...prefix.map(([time, value]): Point => [time * 1000, Number(value)]), ...result];
+  }
   return result;
 }
 

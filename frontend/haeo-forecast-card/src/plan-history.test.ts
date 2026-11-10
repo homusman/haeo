@@ -127,6 +127,11 @@ it("loads the pinned tariff from its archived input instead of a live tariff", (
   expect(Array.from(followed!.times)).toEqual([10000, 15000]);
   const [snapshot] = archivedSeries([source], hass, revised);
   expect(Array.from(snapshot!.values)).toEqual([0.3, 0.4]);
+  const [partial] = archivedSeries([source], hass, {
+    ...revised,
+    execution_inputs: { Grid: { "pricing.import": [[12, 0.5], [15, 0.6]] } },
+  }, 10_500, 15_000, true);
+  expect(Array.from(partial!.times)).toEqual([10_500, 12_000, 15_000]);
   expect(archivedSeries([source], hass, { ...summary, boundaries: [10, 20], series: {} })).toEqual([]);
 });
 

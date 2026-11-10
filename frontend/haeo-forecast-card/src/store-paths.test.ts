@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { computePowerDifferences, computeSocPaths } from "./store-paths";
+import { computePowerDifferences, computePowerShapes, computeSocPaths } from "./store-paths";
 import type { ForecastSeries } from "./types";
 
 function socSeries(overrides: Partial<ForecastSeries>): ForecastSeries {
@@ -44,6 +44,18 @@ describe("computeSocPaths", () => {
 
     expect(paths.map((path) => path.className)).toEqual([undefined, "thresholdLine", "thresholdLine"]);
   });
+});
+
+it("draws early archived power before other series begin", () => {
+  const late = socSeries({
+    key: "late", lane: "power", direction: "+", drawType: "step",
+    times: new Float64Array([5, 10]), values: new Float64Array([1, 0]),
+  });
+  const early = {
+    ...late, key: "early", times: new Float64Array([0, 10]), values: new Float64Array([2, 0]),
+  };
+  const shapes = computePowerShapes([late, early], { min: 0, max: 10 }, "opposed", 0, 10, (time) => time);
+  expect(shapes[1]?.strokePaths[0]).toContain("M 0 8 L 5 8 L 5 7");
 });
 
 it("shades the exact power difference over common intervals in both directions", () => {

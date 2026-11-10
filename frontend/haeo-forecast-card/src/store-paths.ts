@@ -1,4 +1,4 @@
-import { stepArrayIndex } from "./hover";
+import { sharedTimeline, stepArrayIndex } from "./hover";
 import { linearScale, linePath, stepAreaPath, stepPath } from "./geometry";
 import { classifyPowerSeries } from "./power-series-classification";
 import type { ForecastSeries, LaneBounds, PowerDisplayMode } from "./types";
@@ -34,7 +34,11 @@ export function computePowerShapes(
   }
   const { min: powerMin, max: powerMax } = powerBounds;
   const yScalePower = (value: number): number => linearScale(value, powerMin, powerMax, plotBottom, plotTop);
-  const horizonCount = firstSeries.times.length;
+  const shared = sharedTimeline(orderedPowerSeries);
+  const times = shared ?? Float64Array.from(
+    [...new Set(orderedPowerSeries.flatMap((series) => Array.from(series.times)))].sort((a, b) => a - b)
+  );
+  const horizonCount = times.length;
   const stacks = emptySectionStacks(horizonCount);
 
   return orderedPowerSeries.map((series) => {
@@ -45,7 +49,11 @@ export function computePowerShapes(
     const upper = new Float64Array(horizonCount);
     const displayValues = new Float64Array(horizonCount);
     for (let idx = 0; idx < horizonCount; idx += 1) {
-      const value = powerValueForDisplay(series, series.values[idx] ?? 0, powerDisplayMode);
+      const time = times[idx]!;
+      const raw = shared ? series.values[idx] : time >= series.times[0]! && time < series.times.at(-1)!
+        ? series.values[stepArrayIndex(series.times, time)]
+        : 0;
+      const value = powerValueForDisplay(series, raw ?? 0, powerDisplayMode);
       displayValues[idx] = value;
       lower[idx] = stack[idx] ?? 0;
       const next = (stack[idx] ?? 0) + value;
@@ -56,8 +64,8 @@ export function computePowerShapes(
       key: series.key,
       color: series.color,
       isPotential: category.subgroup === "potential",
-      strokePaths: stepTopStrokePaths(series.times, upper, displayValues, xScale, yScalePower),
-      d: stepAreaPath(series.times, lower, upper, xScale, yScalePower),
+      strokePaths: stepTopStrokePaths(times, upper, displayValues, xScale, yScalePower),
+      d: stepAreaPath(times, lower, upper, xScale, yScalePower),
     };
   });
 }
