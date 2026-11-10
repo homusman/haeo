@@ -408,7 +408,7 @@ export class ForecastCardStore {
     return this.sortPowerSeries(this.powerSeries);
   }
 
-  private sortPowerSeries(series: ForecastSeries[]): ForecastSeries[] {
+  sortPowerSeries(series: ForecastSeries[]): ForecastSeries[] {
     return [...series].sort((a, b) => {
       // Primary sort: optimizer priority from the backend determines stack order.
       const aPriority = a.priority ?? Number.POSITIVE_INFINITY;

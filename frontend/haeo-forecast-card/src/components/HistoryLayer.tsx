@@ -11,7 +11,8 @@ import type { ForecastSeries } from "../types";
 
 function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[]) {
   const sources = new Set<string>();
-  const groups = new Map<string, { series: ForecastSeries; points: Point[] }[]>();
+  const groups = new Map<string, { series: ForecastSeries; points: Point[]; color: string }[]>();
+  const recorded = store.normalizedSeries.filter(({ lane, sourceRole }) => lane === "power" && sourceRole !== "limit");
   for (const series of visible) {
     const source = store.actualSources[series.entityId];
     if (series.lane !== "power" || !source || series.sourceRole === "limit") continue;
@@ -20,18 +21,28 @@ function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[])
     const points = actualPoints(store, series, true);
     if (points.length < 2) continue;
     sources.add(key);
-    const group = series.unit;
-    const traces = groups.get(group) ?? [];
-    traces.push({ series, points });
-    groups.set(group, traces);
+    for (const direction of ["+", "-"] as const) {
+      const planned = recorded.find((item) =>
+        item.elementName === series.elementName && item.direction === direction
+        && store.actualSources[item.entityId] === source
+      ) ?? series;
+      const group = JSON.stringify([series.unit, direction]);
+      const traces = groups.get(group) ?? [];
+      const directional = points.map(([time, value]): Point => [
+        time, (direction === "+" ? value > 0 : value < 0) ? value : NaN,
+      ]);
+      traces.push({ series: { ...planned, key: series.key + direction }, points: directional, color: series.color });
+      groups.set(group, traces);
+    }
   }
   const x = (time: number) => store.xScale(time);
   const y = (power: number) => store.yScalePower(power);
   return [...groups.values()].flatMap((traces) => {
     const times = [...new Set(traces.flatMap(({ points }) => points.map(([time]) => time)))].sort((a, b) => a - b);
-    const production = new Float64Array(times.length);
-    const consumption = new Float64Array(times.length);
-    return traces.map(({ series, points }) => {
+    const stack = new Float64Array(times.length);
+    const byKey = new Map(traces.map((trace) => [trace.series.key, trace]));
+    return store.sortPowerSeries(traces.map(({ series }) => series)).map((series) => {
+      const { points, color } = byKey.get(series.key)!;
       let cursor = -1;
       let start = 0;
       const lower = new Float64Array(times.length);
@@ -56,13 +67,12 @@ function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[])
           start = index + 1;
           continue;
         }
-        const stack = value >= 0 ? production : consumption;
         lower[index] = store.powerDisplayMode === "opposed" ? stack[index]! : 0;
         upper[index] = lower[index]! + value;
         stack[index] = upper[index]!;
       }
       flush(times.length - 1);
-      return { series, d: areas.join(" ") };
+      return { series, color, d: areas.join(" ") };
     });
   });
 }
@@ -135,8 +145,8 @@ export const HistoryLayer = observer(function HistoryLayer({
           </g>
         );
       })}
-      {measuredPowerPaths(store, visible).map(({ series, d }) => (
-        <path key={series.key} d={d} fill={series.color} fill-opacity={0.38} stroke={series.color} />
+      {measuredPowerPaths(store, visible).map(({ series, color, d }) => (
+        <path key={series.key} d={d} fill={color} fill-opacity={0.38} stroke={color} />
       ))}
       {visible.filter(({ lane }) => lane !== "power").map((series) => {
         const points = actualPoints(store, series);
