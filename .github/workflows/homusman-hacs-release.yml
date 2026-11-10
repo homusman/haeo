@@ -125,6 +125,8 @@ jobs:
           notes=(--generate-notes)
           if [[ "${{ steps.version.outputs.version }}" == "0.6.0" ]]; then
             notes=(--notes-file docs/homusman-v0.6.0.md)
+          elif [[ "${{ steps.version.outputs.version }}" == "0.6.1" ]]; then
+            notes=(--notes-file docs/homusman-v0.6.1.md)
           fi
           gh release create "v${{ steps.version.outputs.version }}" \
             haeo_homusman.zip haeo_homusman.zip.sha256 --repo "${{ github.repository }}" \

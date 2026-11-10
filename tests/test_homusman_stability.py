@@ -24,11 +24,11 @@ from custom_components.haeo_homusman.core.model.elements import (
 )
 
 
-def make_battery_network(periods=(1.0,)):
+def make_battery_network(periods=(1.0,), initial_charge=5.0):
     network = Network(name="stability", periods=np.array(periods))
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_BATTERY,
-        "name": "battery", "capacity": 10.0, "initial_charge": 5.0,
+        "name": "battery", "capacity": 10.0, "initial_charge": initial_charge,
     })
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_NODE,
@@ -71,6 +71,28 @@ def test_incumbent_does_not_relax_an_impossible_action() -> None:
         make_battery_network().optimize_incumbent({"battery:discharge": (6.0,), "battery:charge": (0.0,)})
 
 
+def test_elapsed_interval_would_double_count_discharge() -> None:
+    from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError
+
+    actions = {"battery:discharge": (5.0,), "battery:charge": (0.0,)}
+    with pytest.raises(InfeasibleError):
+        make_battery_network(initial_charge=4.95).optimize_incumbent(actions)
+    remaining = make_battery_network(periods=(59 / 60,), initial_charge=4.95)
+    assert remaining.optimize_incumbent(actions) == pytest.approx(-0.05 * 59 / 60)
+
+
+def test_broad_conflict_reports_a_feasible_commitment_adjustment(monkeypatch) -> None:
+    from custom_components.haeo_homusman.core.model import network
+    from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError, RowLabel
+
+    monkeypatch.setattr(network, "conflicting_rows", lambda *args, **kwargs: (RowLabel("LP", "row", 0),) * 11)
+    with pytest.raises(InfeasibleError) as error:
+        make_battery_network().optimize_incumbent({"battery:discharge": (6.0,), "battery:charge": (0.0,)})
+    assert len(error.value.conflicts) == 1
+    assert error.value.conflicts[0].element == "battery:discharge"
+    assert "-1 kW" in error.value.conflicts[0].constraint
+
+
 def test_confidence_preserves_current_price_and_shrinks_distant_spikes() -> None:
     from custom_components.haeo_homusman.coordinator.plan_acceptance import adjust_tariff, tariff_weights
 
@@ -104,8 +126,11 @@ def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, exp
     result = plan_acceptance.assess_plan(
         {}, (3600.0,), (3600.0, 7200.0), candidate.action_snapshot(),
         cost, (3600.0, 7200.0), {"battery:discharge": (committed,), "battery:charge": (0.0,)}, threshold,
+        candidate,
     )
     assert result.reason == expected
+    if expected == "accepted":
+        assert result.benefit_drivers == "battery:discharge +0.050"
     if expected == 'incumbent_infeasible':
         assert any('limit' in row.constraint for row in result.conflicts)
 

@@ -800,11 +800,21 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         previous = self._accepted if gate else None
         original = tuple(forecast_timestamps)
-        refined = rolling_boundaries(original, previous.boundaries, previous.actions) if previous else original
-        if refined != original:
-            loaded_configs = refine_configs(loaded_configs, original, refined)
-            periods_seconds = tuple(end - start for start, end in zip(refined[:-1], refined[1:], strict=True))
-            forecast_timestamps = refined
+        if gate:
+            # SoC is measured now, even when the forecast grid starts at an earlier rounded boundary.
+            if start_time >= original[-1]:
+                raise UpdateFailed("Plan acceptance requires a forecast horizon extending beyond the current time")
+            remaining = original
+            if start_time > original[0]:
+                remaining = (start_time, *(boundary for boundary in original if boundary > start_time))
+            refined = (
+                rolling_boundaries(remaining, previous.boundaries, previous.actions) if previous else remaining
+            )
+            if refined != original:
+                loaded_configs = refine_configs(loaded_configs, original, refined)
+                periods_seconds = tuple(end - start for start, end in zip(refined[:-1], refined[1:], strict=True))
+                forecast_timestamps = refined
+            # Match the fresh incumbent model, including parameters that changed with the horizon.
             network = build_network(
                 f"haeo_rolling_{self.config_entry.entry_id}", loaded_configs, periods_seconds,
                 relax_infeasible=self._relax_infeasible,
@@ -852,6 +862,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 previous.boundaries if previous else (),
                 previous.actions if previous else None,
                 threshold,
+                network,
             )
         benchmark = assessment.incumbent_cost
         accepted = assessment.continuation is None
@@ -871,6 +882,7 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
             "last_run": datetime.now(UTC).isoformat(),
             "candidate_cost": cost,
             "incumbent_cost": benchmark,
+            "benefit_drivers": assessment.benefit_drivers,
             "benefit": None if benchmark is None else benchmark - cost,
             "threshold": threshold if gate else 0.0,
             "conflicts": conflict,

@@ -27,7 +27,18 @@ from .elements.connection import Connection, ConnectionElementConfig, Connection
 from .elements.deferrable_load import DeferrableLoad, DeferrableLoadElementConfig
 from .elements.node import Node, NodeElementConfig
 from .elements.policy_pricing import PolicyPricing, PolicyPricingElementConfig
-from .infeasibility import InfeasibleError, Relaxation, RowLabel, conflicting_rows, listing, row_labels, solve_relaxed
+from .infeasibility import (
+    MAX_LISTED_ROWS,
+    RELAXATION_TOLERANCE,
+    InfeasibleError,
+    Relaxation,
+    RowLabel,
+    conflicting_rows,
+    listing,
+    relaxed_rows,
+    row_labels,
+    solve_relaxed,
+)
 from .linear import LinearArray, total
 from .solver import Solver
 from .util.solver_rows import RowIndices, add_rows
@@ -319,6 +330,15 @@ class Network:
         solution = self._solver.column_values()
         return {name: tuple(map(float, power.value(solution))) for name, power in self._action_series().items()}
 
+    def primary_cost_by_element(self) -> dict[str, float]:
+        """Evaluate each element's contribution to the solved primary objective."""
+        solution = self._solver.column_values()
+        return {
+            name: float(cost.value(solution).item())
+            for name, element in self.elements.items()
+            if (cost := element.cost()) is not None
+        }
+
     def optimize_incumbent(self, actions: Mapping[str, tuple[float, ...]]) -> float:
         """Solve a disposable network with the overlapping schedule fixed."""
         return self.optimize(committed_actions=actions)
@@ -381,6 +401,21 @@ class Network:
             labels = row_labels(self.constraints(), self.n_periods, balance_rows)
             labels.update(commitment_labels)
             self.conflicts = conflicting_rows(h, labels, include_bounds=committed_actions is not None)
+            if commitment_labels and (not self.conflicts or len(self.conflicts) > MAX_LISTED_ROWS):
+                weights = np.full(h.getNumRow(), -1.0)
+                for row, label in commitment_labels.items():
+                    assert label.period is not None
+                    weights[row] = self.periods[label.period]
+                relaxed = relaxed_rows(h, labels, weights=weights)
+                if relaxed is not None:
+                    changes = [
+                        RowLabel(label.element, f"{label.constraint}, needs {delta:+.3g} kW change", label.period)
+                        for row, value, bound in zip(relaxed.rows, relaxed.values, relaxed.lower, strict=True)
+                        if (label := commitment_labels.get(int(row))) is not None
+                        and abs(delta := value - bound) > RELAXATION_TOLERANCE
+                    ]
+                    if changes:
+                        self.conflicts = tuple(sorted(changes, key=lambda change: change.period or 0))
             if committed_actions is not None or not self.relax_infeasible:
                 raise InfeasibleError(self.conflicts) from None
 

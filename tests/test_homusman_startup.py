@@ -41,6 +41,7 @@ def test_initialize_then_optimize(enabled: bool) -> None:
         coordinator._network = network
         coordinator._participant_configs = {}
         coordinator._stale_elements = set()
+        coordinator._relax_infeasible = False
         coordinator._accepted = None
         coordinator.plan_history = Mock(record=AsyncMock())
         module = "custom_components.haeo_homusman.coordinator.coordinator"
@@ -56,20 +57,22 @@ def test_initialize_then_optimize(enabled: bool) -> None:
             patch(f"{module}.evaluate_network_connectivity"),
             patch(f"{module}.build_optimization_context", return_value=Mock()),
             patch(f"{module}.input_forecasts", return_value={}),
+            patch(f"{module}.time", Mock(time=Mock(return_value=30.0), monotonic=Mock(return_value=30.0))) as clock,
         ):
             await coordinator.async_initialize()
             plan = await coordinator._async_update_data()
-            assert plan.boundaries == boundaries
+            assert plan.boundaries == ((30.0, 3600.0) if enabled else boundaries)
             assert coordinator.plan_decision["reason"] == ("bootstrap" if enabled else "gate_disabled")
             assert coordinator.hass.async_add_executor_job.await_count == int(enabled)
             coordinator.plan_history.record.assert_awaited_once()
 
             if enabled:
                 shifted = (60.0, 3660.0)
+                clock.time.return_value = 90.0
                 coordinator._runtime_data.horizon_manager.get_forecast_timestamps = lambda: shifted
                 coordinator.hass.async_add_executor_job.return_value = PlanAssessment("below_threshold", 0.1, network)
                 continuation = await coordinator._async_update_data()
-                assert continuation.boundaries == shifted
+                assert continuation.boundaries == (90.0, 3600.0, 3660.0)
                 assert continuation.completed_at == plan.completed_at
                 assert coordinator.plan_history.record.await_args.args[2] is False
                 assert coordinator.accepted_metadata["rolling_cost"] == 0.1

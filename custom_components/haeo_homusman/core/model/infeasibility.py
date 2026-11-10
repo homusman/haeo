@@ -146,17 +146,20 @@ class RelaxedRows(NamedTuple):
     upper: NDArray[np.float64]
 
 
-def relaxed_rows(solver: Solver, labels: Mapping[int, RowLabel]) -> RelaxedRows | None:
+def relaxed_rows(
+    solver: Solver, labels: Mapping[int, RowLabel], *, weights: NDArray[np.float64] | None = None
+) -> RelaxedRows | None:
     """Return the rows a smallest weighted relaxation moves, the values it moves them to, and their bounds.
 
     Only rows give way, never variable bounds, and power balances give way
     before limits. Every row the relaxation moves is returned, however little.
     Returns None when no relaxation of the rows is feasible.
     """
-    weights = np.full(solver.getNumRow(), LIMIT_RELAXATION_WEIGHT)
-    for row, label in labels.items():
-        if label.balance:
-            weights[row] = BALANCE_RELAXATION_WEIGHT
+    if weights is None:
+        weights = np.full(solver.getNumRow(), LIMIT_RELAXATION_WEIGHT)
+        for row, label in labels.items():
+            if label.balance:
+                weights[row] = BALANCE_RELAXATION_WEIGHT
     not_relaxable = -1.0
     status = solver.feasibilityRelaxation(not_relaxable, not_relaxable, LIMIT_RELAXATION_WEIGHT, None, None, weights)
     solution = solver.getSolution()

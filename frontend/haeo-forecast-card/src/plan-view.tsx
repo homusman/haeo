@@ -17,6 +17,8 @@ export interface PlanSummary {
     reason: string;
     benefit: number | null;
     candidate_cost?: number;
+    incumbent_cost?: number | null;
+    benefit_drivers?: string | null;
     conflicts?: string | null;
     accepted?: boolean;
   };
@@ -296,6 +298,10 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
               {candidate.decision.reason.replaceAll("_", " ")}
             </div>
             <div>Benefit {candidate.decision.benefit?.toFixed(3) ?? "—"}</div>
+            {candidate.decision.incumbent_cost != null && (
+              <div>Retained plan repriced {candidate.decision.incumbent_cost.toFixed(3)}</div>
+            )}
+            {candidate.decision.benefit_drivers && <div>Largest cost changes {candidate.decision.benefit_drivers}</div>}
             {candidate.decision.conflicts && <div>Conflicting constraints: {candidate.decision.conflicts}</div>}
           </>
         ) : current ? (
@@ -337,6 +343,10 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
       <div>{reasons[plan.decision.reason] ?? plan.decision.reason.replaceAll("_", " ")}</div>
       {plan.decision.conflicts && <div>Conflicting constraints: {plan.decision.conflicts}</div>}
       {nextCost !== undefined && <div>Saved plan cost {nextCost.toFixed(3)}</div>}
+      {plan.decision.incumbent_cost != null && (
+        <div>Previous plan repriced at acceptance {plan.decision.incumbent_cost.toFixed(3)}</div>
+      )}
+      {plan.decision.benefit_drivers && <div>Largest cost changes {plan.decision.benefit_drivers}</div>}
       {comparisonCost !== null && (
         <div>
           Plan {previousIndex} cost {previousCost?.toFixed(3)} · saved cost difference {comparisonCost.toFixed(3)}

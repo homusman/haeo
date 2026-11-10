@@ -138,6 +138,7 @@ class PlanAssessment:
     incumbent_cost: float | None = None
     continuation: Network | None = None
     conflicts: tuple[RowLabel, ...] = ()
+    benefit_drivers: str | None = None
 
 
 def assess_plan(
@@ -149,6 +150,7 @@ def assess_plan(
     previous_boundaries: Sequence[float],
     previous_actions: Mapping[str, tuple[float, ...]] | None,
     threshold: float,
+    candidate: Network | None = None,
 ) -> PlanAssessment:
     """Keep the old controllable schedule throughout the overlap and optimize only the tail."""
     if not previous_actions or actions.keys() != previous_actions.keys():
@@ -168,5 +170,12 @@ def assess_plan(
     except InfeasibleError as error:
         return PlanAssessment("incumbent_infeasible", conflicts=error.conflicts)
     if benchmark - cost > threshold:
-        return PlanAssessment("accepted", benchmark)
+        drivers = None
+        if candidate is not None:
+            old_costs = network.primary_cost_by_element()
+            new_costs = candidate.primary_cost_by_element()
+            changes = [(name, old - new_costs.get(name, 0.0)) for name, old in old_costs.items()]
+            largest = sorted(changes, key=lambda change: abs(change[1]), reverse=True)[:3]
+            drivers = ", ".join(f"{name} {amount:+.3f}" for name, amount in largest if abs(amount) >= 0.001) or None
+        return PlanAssessment("accepted", benchmark, benefit_drivers=drivers)
     return PlanAssessment("below_threshold", benchmark, network)
