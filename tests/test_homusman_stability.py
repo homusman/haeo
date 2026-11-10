@@ -24,11 +24,12 @@ from custom_components.haeo_homusman.core.model.elements import (
 )
 
 
-def make_battery_network(periods=(1.0,), initial_charge=5.0, capacity=10.0):
+def make_battery_network(periods=(1.0,), initial_charge=5.0, capacity=10.0, **battery_settings):
     network = Network(name="stability", periods=np.array(periods))
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_BATTERY,
         "name": "battery", "capacity": capacity, "initial_charge": initial_charge,
+        **battery_settings,
     })
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_NODE,
@@ -62,6 +63,23 @@ def test_incumbent_values_the_cost_of_holding_current_power() -> None:
     assert candidate.action_snapshot()["battery:discharge"][0] == pytest.approx(5.0)
     assert incumbent.optimize_incumbent({"battery:discharge": (0.0,), "battery:charge": (0.0,)}) - cost == pytest.approx(0.05)
     assert incumbent.action_snapshot()["battery:discharge"][0] == pytest.approx(0.0)
+
+
+def test_gate_identifies_soc_penalty_as_decisive(monkeypatch) -> None:
+    from custom_components.haeo_homusman.coordinator import plan_acceptance
+
+    settings = {"min_charge": 5.0, "charge_limit_cost": 10.0}
+    candidate = make_battery_network(**settings)
+    monkeypatch.setattr(plan_acceptance, "build_network", lambda *a, **kw: make_battery_network(**settings))
+    cost = candidate.optimize()
+    boundaries = (0.0, 3600.0)
+    result = plan_acceptance.assess_plan(
+        {}, (3600.0,), boundaries, candidate.action_snapshot(), cost, boundaries,
+        {"battery:discharge": (0.1,), "battery:charge": (0.0,)}, 0.02, candidate,
+    )
+    assert result.reason == "soc_limit_penalty"
+    assert result.continuation is None
+    assert result.benefit == pytest.approx(0.999)
 
 
 def test_gate_scores_can_discount_terminal_energy_without_changing_the_solve(monkeypatch) -> None:
@@ -207,11 +225,12 @@ def test_grid_gate_adjustments_preserve_raw_prices_and_reverse_export_sign() -> 
 
 
 @pytest.mark.parametrize(
-    ("committed", "threshold", "expected"),
-    [(0.0, 0.02, "accepted"), (0.0, 0.06, "below_threshold"),
-     (5.0, 0.0, "below_threshold"), (6.0, 0.02, "incumbent_infeasible")],
+    ("committed", "threshold", "allowed", "expected"),
+    [(0.0, 0.02, True, "accepted"), (0.0, 0.06, True, "below_threshold"),
+     (5.0, 0.0, True, "below_threshold"), (6.0, 0.02, True, "incumbent_infeasible"),
+     (0.0, 0.02, False, "acceptance_interval"), (6.0, 0.02, False, "incumbent_infeasible")],
 )
-def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, expected) -> None:
+def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, allowed, expected) -> None:
     from custom_components.haeo_homusman.coordinator import plan_acceptance
 
     def build_incumbent(name, configs, periods, *, relax_infeasible):
@@ -226,9 +245,12 @@ def test_gate_uses_same_horizon_benchmark(monkeypatch, committed, threshold, exp
     result = plan_acceptance.assess_plan(
         {}, (3600.0,), (3600.0, 7200.0), candidate.action_snapshot(),
         cost, (3600.0, 7200.0), {"battery:discharge": (committed,), "battery:charge": (0.0,)}, threshold,
-        candidate,
+        candidate, economic_replacement_allowed=allowed,
     )
     assert result.reason == expected
+    if expected == "acceptance_interval":
+        assert result.continuation is not None
+        assert result.benefit == pytest.approx(0.05)
     if expected == "accepted":
         assert result.benefit_drivers == "battery:discharge +0.050"
     if expected == 'incumbent_infeasible':

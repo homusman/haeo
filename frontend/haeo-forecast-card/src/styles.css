@@ -586,6 +586,33 @@ ha-card {
   font-size: 0.8rem;
 }
 
+.benefitHistory {
+  position: relative;
+  cursor: help;
+  text-decoration: underline dotted;
+}
+
+.benefitHistoryPopup {
+  display: none;
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 4;
+  padding: 8px;
+  background: var(--card-background-color, white);
+  border: 1px solid var(--divider-color, gray);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px #0003;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.benefitHistory:hover .benefitHistoryPopup,
+.benefitHistory:focus .benefitHistoryPopup {
+  display: grid;
+}
+
 @container (max-width: 768px) {
   .chartRow {
     flex: 1 1 auto;

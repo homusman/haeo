@@ -3,7 +3,7 @@ import type { Point } from "./archived-series";
 import type { ForecastCardStore } from "./store";
 import type { ForecastSeries } from "./types";
 
-export function actualPoints(store: ForecastCardStore, series: ForecastSeries): Point[] {
+export function actualPoints(store: ForecastCardStore, series: ForecastSeries, signed = false): Point[] {
   const id = store.actualSources[series.entityId];
   if (!id) return [];
   const unit = store.hass?.states[id]?.attributes["unit_of_measurement"];
@@ -27,6 +27,12 @@ export function actualPoints(store: ForecastCardStore, series: ForecastSeries): 
   ].includes(series.outputName);
   const points: Point[] = data.map(({ lu, lc, s }) => {
     const value = s.trim() ? Number(s) * scale * (linked && configured.inverted ? -1 : 1) : NaN;
+    if (signed) {
+      const power = linked && (positive || negative) || series.direction === null
+        ? value
+        : Math.abs(value) * (series.direction === "-" ? -1 : 1);
+      return [(lu ?? lc ?? NaN) * 1000, power];
+    }
     return [
       (lu ?? lc ?? NaN) * 1000,
       linked && (positive || negative) ? Math.max(0, negative ? -value : value) : value,

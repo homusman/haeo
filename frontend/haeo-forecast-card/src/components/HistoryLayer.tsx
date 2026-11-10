@@ -1,6 +1,6 @@
 import { actualPoints } from "../actual-points";
 import type { JSX } from "preact";
-import { linePath, stepPath } from "../geometry";
+import { linePath, stepAreaPath, stepPath } from "../geometry";
 import { observer } from "../mobx-observer";
 import { archivedSeries, type Point } from "../archived-series";
 import { OverlayLineLayer } from "./OverlayLineLayer";
@@ -8,6 +8,62 @@ import { PowerStackLayer } from "./PowerStackLayer";
 import { powerValueForDisplay } from "../power-display";
 import type { ForecastCardStore } from "../store";
 import type { ForecastSeries } from "../types";
+
+function measuredPowerPaths(store: ForecastCardStore, visible: ForecastSeries[]) {
+  const sources = new Set<string>();
+  const groups = new Map<string, { series: ForecastSeries; points: Point[] }[]>();
+  for (const series of visible) {
+    const source = store.actualSources[series.entityId];
+    if (series.lane !== "power" || !source || series.sourceRole === "limit") continue;
+    const key = JSON.stringify([series.elementName, source]);
+    if (sources.has(key)) continue;
+    const points = actualPoints(store, series, true);
+    if (points.length < 2) continue;
+    sources.add(key);
+    const group = JSON.stringify([series.elementType, series.unit]);
+    const traces = groups.get(group) ?? [];
+    traces.push({ series, points });
+    groups.set(group, traces);
+  }
+  const x = (time: number) => store.xScale(time);
+  const y = (power: number) => store.yScalePower(power);
+  return [...groups.values()].flatMap((traces) => {
+    const times = [...new Set(traces.flatMap(({ points }) => points.map(([time]) => time)))].sort((a, b) => a - b);
+    const stack = new Float64Array(times.length);
+    return traces.map(({ series, points }) => {
+      let cursor = -1;
+      let start = 0;
+      const lower = new Float64Array(times.length);
+      const upper = new Float64Array(times.length);
+      const areas: string[] = [];
+      const flush = (end: number): void => {
+        if (end <= start) return;
+        // Duplicate the last interval values at its end to close the filled step.
+        lower[end] = lower[end - 1]!;
+        upper[end] = upper[end - 1]!;
+        areas.push(stepAreaPath(
+          Float64Array.from(times.slice(start, end + 1)),
+          lower.slice(start, end + 1), upper.slice(start, end + 1), x, y,
+        ));
+      };
+      for (let index = 0; index < times.length - 1; index++) {
+        const time = times[index]!;
+        while (cursor + 1 < points.length && points[cursor + 1]![0] <= time) cursor++;
+        const value = cursor >= 0 && cursor < points.length - 1 ? points[cursor]![1] : NaN;
+        if (!Number.isFinite(value)) {
+          flush(index);
+          start = index + 1;
+          continue;
+        }
+        lower[index] = store.powerDisplayMode === "opposed" ? stack[index]! : 0;
+        upper[index] = lower[index]! + value;
+        stack[index] = upper[index]!;
+      }
+      flush(times.length - 1);
+      return { series, d: areas.join(" ") };
+    });
+  });
+}
 
 function path(store: ForecastCardStore, series: ForecastSeries, points: Point[], actual = false): string {
   const draw = series.drawType === "step" ? stepPath : linePath;
@@ -77,7 +133,10 @@ export const HistoryLayer = observer(function HistoryLayer({
           </g>
         );
       })}
-      {visible.map((series) => {
+      {measuredPowerPaths(store, visible).map(({ series, d }) => (
+        <path key={series.key} d={d} fill={series.color} fill-opacity={0.38} stroke={series.color} />
+      ))}
+      {visible.filter(({ lane }) => lane !== "power").map((series) => {
         const points = actualPoints(store, series);
         return (
           <path

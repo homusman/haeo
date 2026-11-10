@@ -1,27 +1,26 @@
 > [!IMPORTANT]
-> **HAEO - Homusman fork (experimental, independently installable).**
-> This fork installs as `custom_components/haeo_homusman` (domain `haeo_homusman`),
-> so it can run alongside the original `haeo` integration. It has separate
-> Home Assistant configuration entries and output entities; it **does not**
-> overwrite or automatically import the original HAEO configuration.
+> **HAEO Homusman**
+>
+> An independently installable Home Assistant energy optimiser with rolling plan
+> acceptance, bounded battery schedule corrections, and a forecast card for
+> comparing candidates and archived plans. It runs alongside upstream HAEO with
+> separate configuration entries and sensors under the `haeo_homusman` domain.
 >
 > **HACS:** Add `https://github.com/homusman/haeo` as a custom **Integration**
 > repository, install **HAEO - Homusman fork**, restart Home Assistant, then
 > add the fork from **Settings → Devices & Services → Add Integration**.
 > The custom HACS release contains `haeo_homusman.zip`.
 >
-> **Experimental stability objective:** Under the fork's advanced hub options,
-> set `stability_penalty_cents_per_kwh` (default 0, disabled) and
-> `stability_window_minutes` (default 60). Recommended initial comparison:
-> 2 cents/kWh over 60 minutes. The solver adds a timestamp-aligned, linearly
-> decaying monetary penalty to changes in planned net battery kW versus the last
-> successful plan. The actual electricity cost remains separately reported.
-> It is not a hard power-change limit or a fixed on/off switching charge.
+> In the hub's **Advanced** settings, enable the rolling plan acceptance gate.
+> Set the minimum modelled savings, optional minimum time between economic
+> acceptances, and per-battery power and energy correction limits. The gate
+> evaluates the retained schedule and the candidate on the same current inputs.
 >
 > **For safe comparison:** Keep the original HAEO Dispatch Controller pointed
 > at the original HAEO sensors. The fork optimises independently and must not
-> issue simultaneous competing commands to the same inverters. Test first with
-> the penalty disabled, then enable it for a controlled A/B comparison.
+> issue simultaneous competing commands to the same inverters. Use the
+> Homusman forecast card to inspect the retained schedule, candidate, measured
+> Recorder history, and benefit diagnostics.
 
 ---
 

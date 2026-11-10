@@ -221,6 +221,7 @@ def assess_plan(
     correction_power: float = 0.0,
     correction_energy: float = 0.0,
     energy_used: Mapping[str, float] | None = None,
+    economic_replacement_allowed: bool = True,
 ) -> PlanAssessment:
     """Keep the old controllable schedule throughout the overlap and optimize only the tail."""
     if not previous_actions or actions.keys() != previous_actions.keys():
@@ -245,6 +246,7 @@ def assess_plan(
     benefit = benchmark - cost
     gate_old = gate_new = None
     drivers = None
+    soc_penalty_reduction = 0.0
     if candidate is not None:
         adjustments = grid_tariff_adjustments(configs, boundaries, weights) if weights is not None else None
         terminal_weight = 1.0
@@ -258,13 +260,20 @@ def assess_plan(
             gate_old, gate_new = sum(old_costs.values()), sum(new_costs.values())
             benefit = gate_old - gate_new
         changes = [(name, old - new_costs.get(name, 0.0)) for name, old in old_costs.items()]
+        soc_penalty_reduction = sum(change for (_, term), change in changes if term == "SoC limits")
         largest = sorted(changes, key=lambda change: abs(change[1]), reverse=True)[:3]
         drivers = ", ".join(
             f"{' '.join(filter(None, label))} {amount:+.3f}" for label, amount in largest if abs(amount) >= 0.001
         ) or None
     accepted = benefit > threshold
+    reason = "below_threshold"
+    if accepted and not economic_replacement_allowed:
+        accepted = False
+        reason = "acceptance_interval"
+    elif accepted:
+        reason = "soc_limit_penalty" if benefit - soc_penalty_reduction <= threshold else "accepted"
     return PlanAssessment(
-        "accepted" if accepted else "below_threshold",
+        reason,
         benchmark,
         None if accepted else network,
         benefit_drivers=drivers,

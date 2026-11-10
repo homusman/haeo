@@ -254,7 +254,7 @@ export const ForecastCardView = observer(function ForecastCardView(props: Foreca
           className="chartContainer comparisonChart"
           onContextMenu={(event) => {
             event.preventDefault();
-            props.store.clearComparison();
+            props.store.clearComparison(true);
           }}
         >
           <span className="chartLabel" style={plotLabelPosition}>

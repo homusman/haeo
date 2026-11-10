@@ -93,6 +93,7 @@ export class ForecastCardStore {
   historyDetails: Record<string, PlanDetail> = {};
   powerMeasurements: Record<string, PowerMeasurement> = {};
   actuals: Record<string, RecorderState[]> = {};
+  latestAcceptedId: string | null = null;
   normalizedSeriesCache: ForecastSeries[] = [];
   powerBoundsCache: LaneBounds = { min: -1, max: 1 };
   cardWidth = 640;
@@ -130,6 +131,7 @@ export class ForecastCardStore {
       candidatePreview: observable.ref,
       historyDetails: observable.ref,
       actuals: observable.ref,
+      latestAcceptedId: observable,
       powerMeasurements: observable.ref,
       normalizedSeriesCache: observable.ref,
       instanceId: false,
@@ -210,6 +212,7 @@ export class ForecastCardStore {
       this.setSegments([]);
       this.clearComparison();
       this.setCurrentPlanMetadata(null);
+      this.setLatestAcceptedId(null);
       this.restoreRangeSettings(config.hub_entry_id);
       this.setActuals({});
       this.setPowerMeasurements({});
@@ -527,7 +530,12 @@ export class ForecastCardStore {
     return Math.max(1, Math.min(168, Math.ceil((domain.max - domain.min) / HOUR_MS)));
   }
 
-  clearComparison(): void {
+  setLatestAcceptedId(id: string | null): void {
+    this.latestAcceptedId = id;
+  }
+
+  clearComparison(keepLatest = false): void {
+    if (keepLatest && this.pinnedPlanId && this.pinnedPlanId === this.latestAcceptedId) return;
     this.comparisonRequest += 1;
     this.pinnedPlanId = null;
     this.pinnedSegment = null;
@@ -547,8 +555,8 @@ export class ForecastCardStore {
     }
   }
 
-  async selectCandidate(): Promise<void> {
-    this.clearComparison();
+  async selectCandidate(refresh = false): Promise<void> {
+    if (!refresh) this.clearComparison();
     const request = this.comparisonRequest;
     const entry = this.config.hub_entry_id;
     if (!entry || !this.hass?.callWS) return;

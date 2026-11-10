@@ -189,7 +189,7 @@ export const ChartSvg = observer(function ChartSvg(props: ChartSvgProps): JSX.El
       onPointerLeave={props.onPointerLeave}
       onContextMenu={(event) => {
         event.preventDefault();
-        store.clearComparison();
+        store.clearComparison(true);
       }}
       onClick={(event) => {
         if (props.comparison) return;

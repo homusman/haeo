@@ -882,6 +882,9 @@ class HaeoDataUpdateCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 float(advanced.get("plan_correction_power_kw", 0.1)),
                 float(advanced.get("plan_correction_energy_kwh", 0.25)),
                 used,
+                previous is None or (
+                    candidate.completed_at - previous.completed_at
+                ).total_seconds() >= 60 * float(advanced.get("plan_min_acceptance_minutes", 0.0)),
             )
         benchmark = assessment.incumbent_cost
         accepted = assessment.continuation is None

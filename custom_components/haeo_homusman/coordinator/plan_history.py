@@ -28,6 +28,7 @@ MAX_PLAN_BYTES = 512 * 1024
 PAGE_SIZE = 32
 MAX_REVISIONS = 128
 MAX_EXECUTION_POINTS = 2048
+MAX_EVALUATIONS = 20_000
 
 
 def revision_changes(plan: "CoordinatorData") -> dict[str, list[list[float]]]:
@@ -138,6 +139,7 @@ class PlanHistory:
         self.lock = Lock()
         self.accepted: list[dict] = []
         self.latest: dict | None = None
+        self.evaluations: list[list] = []
         self.loaded = False
 
     async def load(self) -> None:
@@ -146,6 +148,7 @@ class PlanHistory:
             try:
                 data = await self.store.async_load()
                 self.accepted = data["accepted"] if data else []
+                self.evaluations = data.get("evaluations", []) if data else []
             except (OSError, ValueError, KeyError):
                 _LOGGER.exception("Could not load archived HAEO plans")
             self.loaded = True
@@ -161,6 +164,14 @@ class PlanHistory:
             self.latest = record if size else None
             cutoff = plan.boundaries[0] - (plan.boundaries[-1] - plan.boundaries[0])
             pruned = self.prune(cutoff)
+            if decision["reason"] != "gate_disabled":
+                evaluated = plan.completed_at.timestamp()
+                baseline = previous.completed_at.timestamp() if previous is not None else evaluated
+                self.evaluations.append([evaluated, baseline, decision.get("benefit")])
+                self.evaluations = [
+                    point for point in self.evaluations[-MAX_EVALUATIONS:] if point[0] >= cutoff
+                ]
+                pruned = True
             if previous is not None and self.accepted:
                 archived = self.accepted[-1]
                 if archived["generated_at"] == previous.completed_at.astimezone(UTC).isoformat():
@@ -220,7 +231,7 @@ class PlanHistory:
                     self.accepted[-1]["ended_at"] = datetime.now(UTC).isoformat()
                     pruned = True
             elif accepted and self.latest is not None:
-                accepted_at = datetime.now(UTC).isoformat()
+                accepted_at = record["generated_at"]
                 self.accepted.append({**record, "accepted_at": accepted_at, "size": size})
                 self.prune(cutoff)
                 pruned = True
@@ -262,7 +273,7 @@ class PlanHistory:
     async def save(self) -> None:
         """Write the current archive."""
         try:
-            await self.store.async_save({"accepted": self.accepted})
+            await self.store.async_save({"accepted": self.accepted, "evaluations": self.evaluations})
         except (OSError, ValueError):
             _LOGGER.exception("Could not save archived HAEO plan")
 
@@ -285,6 +296,7 @@ class PlanHistory:
     vol.Optional("plan_id"): str,
     vol.Optional("before"): str,
     vol.Optional("purge"): bool,
+    vol.Optional("evaluations"): bool,
 })
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -302,6 +314,7 @@ async def websocket_plans(hass: HomeAssistant, connection: websocket_api.ActiveC
         if msg.get("purge"):
             await history.store.async_remove()
             history.accepted.clear()
+            history.evaluations.clear()
             connection.send_result(msg["id"], {"plans": [], "archive": await history.diagnostics()})
             return
         response = await plans_response(history, coordinator.plan_decision, msg)
@@ -328,6 +341,8 @@ async def plans_response(history: PlanHistory, decision: dict, msg: dict) -> dic
             (record for record in history.accepted if record["id"] == plan_id), None
         )
         return record
+    if msg.get("evaluations"):
+        return {"evaluations": history.evaluations}
     records = [
         {
             "id": record["id"],
@@ -342,5 +357,8 @@ async def plans_response(history: PlanHistory, decision: dict, msg: dict) -> dic
         for record in reversed(history.accepted)
         if not msg.get("before") or record["id"] < msg["before"]
     ][:PAGE_SIZE]
-    return {"plans": records, "decision": decision, "archive": await history.diagnostics()}
+    return {
+        "plans": records, "latest_accepted": records[0] if records and not msg.get("before") else None,
+        "decision": decision, "archive": await history.diagnostics(),
+    }
 

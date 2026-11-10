@@ -65,6 +65,7 @@ export interface RecorderState {
 
 interface ArchivePage {
   plans: PlanSummary[];
+  latest_accepted?: PlanSummary | null;
   current_plan?: CurrentPlanMetadata | null;
   measurements?: Record<string, PowerMeasurement>;
   decision?: { status?: string; last_run?: string; benefit?: number | null; accepted?: boolean };
@@ -142,6 +143,7 @@ export const PlanControls = observer(function PlanControls({
           setArchive(page.archive);
           setDecision(page.decision);
           store.setCurrentPlanMetadata(page.current_plan ?? null);
+          if (!before) store.setLatestAcceptedId(page.latest_accepted?.id ?? page.plans[0]?.id ?? null);
           store.setPowerMeasurements(page.measurements ?? {});
           plans.push(...page.plans);
           before =
@@ -149,6 +151,7 @@ export const PlanControls = observer(function PlanControls({
               ? page.plans.at(-1)!.id
               : undefined;
         } while (past && before && plans.length < 256);
+        if (store.candidatePreview) void store.selectCandidate(true);
         const segments = past ? historicSegments(plans, now).filter((segment) => segment.end > cutoff) : [];
         store.setSegments(segments);
         const ids = segments.filter(({ plan }) => {
@@ -227,6 +230,7 @@ export const PlanControls = observer(function PlanControls({
       });
       if (page) setArchive(page.archive);
       if (store.pinnedPlanId) store.clearComparison();
+      store.setLatestAcceptedId(null);
       store.setSegments([]);
       setRevision((value) => value + 1);
       setError("");
@@ -255,7 +259,7 @@ export const PlanControls = observer(function PlanControls({
         </div>
       )}
       <div className="optimizerSummary">
-        Optimiser {decision?.status ?? "pending"} · Benefit {decision?.benefit?.toFixed(3) ?? "—"} · Last run{" "}
+        Optimiser {decision?.status ?? "pending"} · <BenefitHistory store={store} benefit={decision?.benefit} /> · Last run{" "}
         {decision?.last_run ? formatRunAge(clock - Date.parse(decision.last_run)) : "—"}
         {decision?.accepted !== undefined && (decision.accepted ? " · Accepted" : " · Not accepted")}
       </div>
@@ -266,6 +270,56 @@ export const PlanControls = observer(function PlanControls({
 
 function formatRunAge(milliseconds: number): string {
   return Number.isFinite(milliseconds) ? formatDuration(Math.max(0, milliseconds)) + " ago" : "—";
+}
+
+type Evaluation = [evaluated: number, accepted: number, benefit: number | null];
+
+function BenefitHistory({ store, benefit }: { store: ForecastCardStore; benefit?: number | null | undefined }): JSX.Element {
+  const hub = store.config.hub_entry_id;
+  const [history, setHistory] = useState<{ hub: typeof hub; points: Evaluation[] }>();
+  const [failed, setFailed] = useState(false);
+  async function load(): Promise<void> {
+    setFailed(false);
+    try {
+      const response = await store.hass?.callWS?.<{ evaluations: Evaluation[] }>({
+        type: "haeo_homusman/plans", entry_id: hub, evaluations: true,
+      });
+      if (response) setHistory({ hub, points: response.evaluations });
+    } catch {
+      setFailed(true);
+    }
+  }
+  const points = history?.hub === hub ? history?.points ?? [] : [];
+  const numeric = points.flatMap(([evaluated, accepted, value]) =>
+    value != null && Number.isFinite(value) ? [[Math.max(0, evaluated - accepted), value, accepted] as const] : []
+  );
+  const age = Math.max(1, ...numeric.map(([elapsed]) => elapsed));
+  const low = Math.min(0, ...numeric.map(([, value]) => value));
+  const high = Math.max(0.001, ...numeric.map(([, value]) => value));
+  const latest = numeric.at(-1)?.[2];
+  const mark = ([elapsed, value]: (typeof numeric)[number]): string =>
+    `M ${12 + 248 * elapsed / age} ${85 - 72 * (value - low) / (high - low)} h 1`;
+  const earlierMarks = numeric.filter(([, , accepted]) => accepted !== latest).map(mark).join(" ");
+  const latestMarks = numeric.filter(([, , accepted]) => accepted === latest).map(mark).join(" ");
+  return (
+    <span className="benefitHistory" tabIndex={0} onMouseEnter={() => void load()} onFocus={() => void load()}>
+      Benefit {benefit?.toFixed(3) ?? "—"}
+      <span className="benefitHistoryPopup" role="tooltip">
+        <strong>Candidate benefit by retained plan age</strong>
+        {numeric.length ? (
+          <>
+            <svg viewBox="0 0 272 96" width="272" height="96" aria-label="Benefit versus time since acceptance">
+              <path d="M 12 9 V 85 H 261" fill="none" stroke="currentColor" opacity={0.5} />
+              <path d={earlierMarks} stroke="currentColor" opacity={0.25} stroke-width={2} />
+              <path d={latestMarks} stroke="var(--primary-color, currentColor)" stroke-width={3} />
+            </svg>
+            <span>{low.toFixed(3)} to {high.toFixed(3)} · 0s to {formatDuration(age * 1000)}</span>
+          </>
+        ) : <span>{failed ? "Benefit history unavailable" : "No scored evaluations yet"}</span>}
+        {points.length > numeric.length && <span>{points.length - numeric.length} evaluations without a score</span>}
+      </span>
+    </span>
+  );
 }
 
 function formatDuration(milliseconds: number): string {
@@ -284,27 +338,27 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
     ? null
     : (store.hoveredPlan ?? store.segments.find(({ plan }) => plan.id === store.pinnedPlanId) ?? store.pinnedSegment);
   const selection = store.pinnedPlanId || store.candidatePreview;
-  const clear = selection ? (
-    <button type="button" onClick={() => store.clearComparison()}>
+  const clear = selection && (store.candidatePreview || store.pinnedPlanId !== store.latestAcceptedId) ? (
+    <button type="button" onClick={() => store.clearComparison(true)}>
       Clear comparison
     </button>
   ) : null;
-  if (!segment) {
+  if (!segment || segment.plan.id === store.currentPlanMetadata?.accepted_at) {
     const candidate = store.candidatePreview;
     const current = store.currentPlanMetadata;
     const candidateOffset =
       Date.parse(candidate?.generated_at ?? "") - Date.parse(current?.accepted_at ?? "");
     return (
       <aside className="historicPlanInfo">
-        <strong>{candidate ? "Candidate" : "Current plan"}</strong>
+        <strong>{candidate ? "Candidate" : segment ? "Plan latest" : "Current plan"}</strong>
         {candidate ? (
           <>
             <div>Candidate cost {candidate.decision.candidate_cost?.toFixed(3) ?? "—"}</div>
-            {Number.isFinite(candidateOffset) && (
+            {Number.isFinite(candidateOffset) && candidateOffset >= 0 && (
               <div>
                 {candidateOffset === 0
                   ? "Generated at the current plan’s acceptance time"
-                  : `${formatDuration(Math.abs(candidateOffset))} ${candidateOffset > 0 ? "after" : "before"} current plan acceptance`}
+                  : `${formatDuration(candidateOffset)} after current plan acceptance`}
               </div>
             )}
             <div>
@@ -324,6 +378,10 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
             <div>Accepted {new Date(current.accepted_at).toLocaleString()}</div>
             <div>Horizon ends {new Date(current.ends * 1000).toLocaleString()}</div>
             <div>Rolling cost {current.rolling_cost?.toFixed(3) ?? "—"}</div>
+            <div>Cost at acceptance {current.decision.candidate_cost?.toFixed(3) ?? "—"}</div>
+            <div>Benefit at acceptance {current.decision.benefit?.toFixed(3) ?? "—"}</div>
+            <GateScores decision={current.decision} />
+            {current.decision.benefit_drivers && <div>Largest cost changes {current.decision.benefit_drivers}</div>}
             <div>Revision {current.revision ?? 0}</div>
             {Object.entries(current.correction_energy_used ?? {}).map(([name, energy]) => (
               <div key={name}>{name} elapsed correction {energy.toFixed(3)} kWh</div>
@@ -350,6 +408,10 @@ export const HistoricPlanInfo = observer(function HistoricPlanInfo({
       "There was no eligible active plan to continue, so the optimizer accepted this plan as its starting point.",
     accepted:
       "The candidate beat the cost of retaining the previous schedule and extending its tail by more than the configured threshold.",
+    soc_limit_penalty:
+      "The retained schedule incurs higher penalties for exceeding configured SoC limits. Reducing those penalties made the candidate clear the acceptance threshold.",
+    acceptance_interval:
+      "The candidate cleared the savings threshold before the minimum acceptance interval elapsed.",
     expired:
       "The preceding plan could no longer cover the next dispatch interval, so the optimizer accepted a fresh plan.",
     incumbent_infeasible:
