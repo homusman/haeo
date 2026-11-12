@@ -137,6 +137,8 @@ jobs:
             notes=(--notes-file docs/homusman-v0.7.2.md)
           elif [[ "${{ steps.version.outputs.version }}" == "0.7.3" ]]; then
             notes=(--notes-file docs/homusman-v0.7.3.md)
+          elif [[ "${{ steps.version.outputs.version }}" == "0.7.4" ]]; then
+            notes=(--notes-file docs/homusman-v0.7.4.md)
           fi
           gh release create "v${{ steps.version.outputs.version }}" \
             haeo_homusman.zip haeo_homusman.zip.sha256 --repo "${{ github.repository }}" \

@@ -156,6 +156,38 @@ def test_economic_opportunity_alone_does_not_nudge_the_retained_plan() -> None:
     assert network.action_snapshot()["battery:discharge"][0] == pytest.approx(0.0, abs=1e-7)
 
 
+@pytest.mark.parametrize("direction,limits", [("discharge", {"min_charge": 4.95}), ("charge", {"max_charge": 5.05})])
+@pytest.mark.parametrize("budget,last_power", [(0.25, 0.0), (0.025, 0.025)])
+def test_retention_repairs_soc_targets_before_minimizing_late_corrections(budget, last_power, direction, limits) -> None:
+    network = make_battery_network(
+        periods=(1.0, 1.0), charge_limit_cost=100.0, **limits,
+    )
+    other = "charge" if direction == "discharge" else "discharge"
+    original = {f"battery:{direction}": (0.05, 0.05), f"battery:{other}": (0.0, 0.0)}
+    network.optimize_incumbent(original, correction_power=0.1, correction_energy=budget)
+    actions = network.action_snapshot()
+    assert actions[f"battery:{direction}"][0] == pytest.approx(0.05, abs=1e-6)
+    assert actions[f"battery:{direction}"][1] == pytest.approx(last_power, abs=1e-6)
+    assert sum(actions[f"battery:{other}"]) == pytest.approx(0.0, abs=1e-6)
+    penalties = network.primary_cost_by_element()["battery", "SoC limits"]
+    assert penalties == pytest.approx(last_power * 100, abs=1e-5)
+    assert original[f"battery:{direction}"] == (0.05, 0.05)
+
+
+@pytest.mark.parametrize("initial,direction,limits", [
+    (4.9, "charge", {"min_charge": 4.95}), (5.1, "discharge", {"max_charge": 5.05}),
+])
+def test_soc_recovery_can_override_the_later_correction_preference(initial, direction, limits) -> None:
+    network = make_battery_network(
+        periods=(1.0, 1.0), initial_charge=initial, charge_limit_cost=100.0, **limits,
+    )
+    original = {"battery:discharge": (0.0, 0.0), "battery:charge": (0.0, 0.0)}
+    network.optimize_incumbent(original, correction_power=0.1, correction_energy=0.25)
+    actions = network.action_snapshot()
+    assert actions[f"battery:{direction}"][0] == pytest.approx(0.05, abs=1e-6)
+    assert actions[f"battery:{direction}"][1] == pytest.approx(0.0, abs=1e-6)
+
+
 def test_charge_and_discharge_share_the_power_correction_bound() -> None:
     from custom_components.haeo_homusman.core.model.infeasibility import InfeasibleError
 

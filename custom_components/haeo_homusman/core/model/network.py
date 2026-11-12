@@ -391,6 +391,7 @@ class Network:
 
         commitment_labels: dict[int, RowLabel] = {}
         correction_terms: list[LinearArray] = []
+        correction_timing_terms: list[LinearArray] = []
         if committed_actions is not None:
             series = self._action_series()
             battery_actions = {
@@ -422,6 +423,10 @@ class Network:
                 rows, _ = add_rows(h, energy <= remaining)
                 commitment_labels[int(rows[0])] = RowLabel(name, f"remaining correction budget {remaining:g} kWh", None)
                 correction_terms.append(energy)
+                elapsed = np.cumsum(self.periods[:len(deviation)]) - self.periods[:len(deviation)]
+                correction_timing_terms.append(
+                    (deviation * (self.periods[:len(deviation)] / (1.0 + elapsed))).total()
+                )
         primary, secondary = self.cost()
         if primary is None:
             msg = "Network has no primary cost — add pricing to connections or nodes"
@@ -438,19 +443,28 @@ class Network:
         self.relaxations = ()
         try:
             if correction_terms:
-                correction = LinearArray.sum_of(correction_terms)
-                _set_objective(h, all_col_indices, Objective.of(correction, n_vars))
-                h.run()
-                status = h.getModelStatus()
-                if status == HighsModelStatus.kUnboundedOrInfeasible:
-                    status = _status_without_presolve(h)
-                if status == HighsModelStatus.kInfeasible:
-                    raise InfeasibleError
-                if status != HighsModelStatus.kOptimal:
-                    raise SolverError(h.modelStatusToString(status))
-                minimum = float(correction.value(h.column_values()).item())
-                rows, _ = add_rows(h, correction <= minimum + 1e-8)
-                commitment_labels[int(rows[0])] = RowLabel("Schedule", "minimum necessary correction", None)
+                soc_penalty = LinearArray.sum_of([
+                    element.battery_charge_limit_cost()
+                    for element in self.elements.values() if isinstance(element, Battery)
+                ])
+                priorities = (
+                    ("minimum SoC target penalty", soc_penalty),
+                    ("minimum necessary correction", LinearArray.sum_of(correction_terms)),
+                    ("later correction preference", LinearArray.sum_of(correction_timing_terms)),
+                )
+                for label, objective in priorities:
+                    _set_objective(h, all_col_indices, Objective.of(objective, n_vars))
+                    h.run()
+                    status = h.getModelStatus()
+                    if status == HighsModelStatus.kUnboundedOrInfeasible:
+                        status = _status_without_presolve(h)
+                    if status == HighsModelStatus.kInfeasible:
+                        raise InfeasibleError
+                    if status != HighsModelStatus.kOptimal:
+                        raise SolverError(h.modelStatusToString(status))
+                    minimum = float(objective.value(h.column_values()).item())
+                    rows, _ = add_rows(h, objective <= minimum + 1e-8)
+                    commitment_labels[int(rows[0])] = RowLabel("Schedule", label, None)
             return self._solve(all_col_indices, objectives)
         except InfeasibleError:
             balance_rows = {
