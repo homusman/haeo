@@ -17,6 +17,21 @@ from custom_components.haeo_homusman.core.const import (
 from custom_components.haeo_homusman.flows import HUB_SECTION_ADVANCED
 
 
+def test_grid_price_reference_settings_are_optional_and_display_only() -> None:
+    """Save/restore/remove references without changing optimizer pricing."""
+    from custom_components.haeo_homusman.flows.elements.grid import GridSubentryFlowHandler
+
+    flow = GridSubentryFlowHandler()
+    inputs = {"connection": "bus", "raw_import_price": "sensor.raw", "raw_export_price": "sensor.feed_in"}
+    fields = flow._config_fields(inputs, {})
+    assert fields["raw_import_price"] == "sensor.raw"
+    assert fields["raw_export_price"] == "sensor.feed_in"
+    assert "pricing" not in fields
+    defaults = flow._top_level_defaults(fields)
+    assert defaults["raw_import_price"] == "sensor.raw"
+    assert "raw_import_price" not in flow._config_fields({"connection": "bus"}, {})
+
+
 @pytest.mark.parametrize("enabled", [False, True])
 def test_initialize_then_optimize(enabled: bool) -> None:
     """The coordinator reads advanced options during optimization, using its current horizon."""

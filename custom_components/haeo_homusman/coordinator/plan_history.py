@@ -18,6 +18,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.haeo_homusman.const import DOMAIN
 from custom_components.haeo_homusman.core.const import CONF_MEASURED_POWER, CONF_MEASURED_POWER_INVERTED
+from .price_references import reference_price_forecasts
 
 if TYPE_CHECKING:
     from .coordinator import CoordinatorData
@@ -79,7 +80,7 @@ def append_execution(target: dict, source: dict, start: float, end: float, linea
 
 def input_forecasts(hass: HomeAssistant, entry_id: str) -> dict:
     """Capture the plotted input forecasts as they existed at the start of a solve."""
-    result = {}
+    result = reference_price_forecasts(hass, hass.config_entries.async_get_entry(entry_id))
     entries = er.async_entries_for_config_entry(er.async_get(hass), entry_id)
     for entry in entries:
         if (state := hass.states.get(entry.entity_id)) is None:
@@ -323,6 +324,7 @@ async def websocket_plans(hass: HomeAssistant, connection: websocket_api.ActiveC
     else:
         if not msg.get("plan_id"):
             response["current_plan"] = coordinator.accepted_metadata
+            response["reference_prices"] = reference_price_forecasts(hass, entry)
             response["measurements"] = {
                 subentry.title: {
                     "entity_id": entity_id,

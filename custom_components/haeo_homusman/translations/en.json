@@ -375,7 +375,8 @@
         "user": {
           "title": "Grid configuration",
           "description": "Configure grid import/export parameters and pricing",
-          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Grid name" },
+          "data": { "measured_power": "Measured power sensor", "measured_power_inverted": "Invert measured power sign", "connection": "Connection", "name": "Grid name", "raw_import_price": "Raw import price sensor (dotted overlay only)", "raw_export_price": "Raw export price sensor (dotted overlay only)" },
+          "data_description": { "raw_import_price": "Optional original tariff forecast before filtering. Display only; never used by the optimiser. Leave empty to hide.", "raw_export_price": "Optional original tariff forecast before filtering. Display only; never used by the optimiser. Leave empty to hide." },
           "sections": {
             "power_limits": {
               "data": { "max_power_source_target": "Import limit", "max_power_target_source": "Export limit" },

@@ -1,7 +1,8 @@
 import { actualPoints, measuredAt } from "./actual-points";
+import { referencePriceSeries, type ReferencePrices } from "./reference-prices";
 import { archivedSeries } from "./archived-series";
 import { discoverActualSources, type PowerMeasurement } from "./actual-sources";
-import { computed, makeAutoObservable, observable } from "mobx";
+import { action, computed, makeAutoObservable, observable } from "mobx";
 
 import { clamp, linearScale } from "./geometry";
 import { computeHoverIndices, sharedTimeline } from "./hover";
@@ -92,6 +93,7 @@ export class ForecastCardStore {
   segments: PlanSegment[] = [];
   historyDetails: Record<string, PlanDetail> = {};
   powerMeasurements: Record<string, PowerMeasurement> = {};
+  referencePrices: ReferencePrices = {};
   actuals: Record<string, RecorderState[]> = {};
   latestAcceptedId: string | null = null;
   normalizedSeriesCache: ForecastSeries[] = [];
@@ -133,6 +135,7 @@ export class ForecastCardStore {
       actuals: observable.ref,
       latestAcceptedId: observable,
       powerMeasurements: observable.ref,
+      referencePrices: observable.ref,
       normalizedSeriesCache: observable.ref,
       instanceId: false,
       plotPathsSnapshot: false,
@@ -194,6 +197,17 @@ export class ForecastCardStore {
     this.powerMeasurements = measurements;
   }
 
+  setReferencePrices(prices: ReferencePrices): void {
+    this.referencePrices = prices;
+  }
+
+  referencePricePaths(comparison: boolean): LineSvgPath[] {
+    const detail = this.candidatePreview ?? (this.pinnedPlanId ? this.historyDetails[this.pinnedPlanId] : undefined);
+    const prices = comparison ? detail?.inputs ?? {} : this.referencePrices;
+    const visible = comparison ? this.pinnedComparisonSeries : this.priceSeries;
+    return this.pathsForSeries(referencePriceSeries(visible, prices)).pricePaths;
+  }
+
   get pinnedComparisonSeries(): ForecastSeries[] {
     const detail = this.pinnedPlanId && this.historyDetails[this.pinnedPlanId];
     return this.candidatePreview
@@ -216,6 +230,7 @@ export class ForecastCardStore {
       this.restoreRangeSettings(config.hub_entry_id);
       this.setActuals({});
       this.setPowerMeasurements({});
+      this.setReferencePrices({});
     }
     this.config = config;
     this.applyConfigDefaults();
@@ -1116,7 +1131,7 @@ export class ForecastCardStore {
     const startMs = globalThis.performance.now();
     this.horizonAnimation = { from, to, startMs };
     this.horizonAnimationNowMs = startMs;
-    const tick = (nowMs: number): void => {
+    const tick = action((nowMs: number): void => {
       this.horizonAnimationNowMs = nowMs;
       if (nowMs - startMs >= HORIZON_ANIMATION_MS) {
         this.horizonAnimation = null;
@@ -1124,7 +1139,7 @@ export class ForecastCardStore {
         return;
       }
       this.horizonAnimationFrame = requestAnimationFrame(tick);
-    };
+    });
     this.horizonAnimationFrame = requestAnimationFrame(tick);
   }
 

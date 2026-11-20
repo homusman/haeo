@@ -3,6 +3,7 @@ import type { JSX } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { observer } from "./mobx-observer";
 import type { PowerMeasurement } from "./actual-sources";
+import type { ReferencePrices } from "./reference-prices";
 import type { ForecastCardStore } from "./store";
 
 const HOUR = 3_600_000;
@@ -68,6 +69,7 @@ interface ArchivePage {
   latest_accepted?: PlanSummary | null;
   current_plan?: CurrentPlanMetadata | null;
   measurements?: Record<string, PowerMeasurement>;
+  reference_prices?: ReferencePrices;
   decision?: { status?: string; last_run?: string; benefit?: number | null; accepted?: boolean };
   archive: { plans: number; bytes: number };
 }
@@ -145,6 +147,7 @@ export const PlanControls = observer(function PlanControls({
           store.setCurrentPlanMetadata(page.current_plan ?? null);
           if (!before) store.setLatestAcceptedId(page.latest_accepted?.id ?? page.plans[0]?.id ?? null);
           store.setPowerMeasurements(page.measurements ?? {});
+          store.setReferencePrices(page.reference_prices ?? {});
           plans.push(...page.plans);
           before =
             page.plans.length === PAGE && Date.parse(page.plans.at(-1)!.accepted_at) > cutoff
@@ -263,6 +266,7 @@ export const PlanControls = observer(function PlanControls({
         {decision?.last_run ? formatRunAge(clock - Date.parse(decision.last_run)) : "—"}
         {decision?.accepted !== undefined && (decision.accepted ? " · Accepted" : " · Not accepted")}
       </div>
+      {Object.keys(store.referencePrices).length > 0 && <div>Dotted prices: raw forecast before filtering</div>}
       {(error || store.comparisonError) && <div role="status">{error || store.comparisonError}</div>}
     </div>
   );

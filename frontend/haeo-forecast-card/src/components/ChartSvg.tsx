@@ -159,6 +159,12 @@ const PlotViewport = observer(function PlotViewport(props: {
           <WindowLayer store={store} comparison={props.comparison} />
           <PowerLayer store={store} paths={paths} />
           <OverlayLayers store={store} paths={paths} />
+          {store.referencePricePaths(props.comparison).map((line) => (
+            <path key={line.key} className="lineSeries priceLine" d={line.d}
+              stroke={line.color} stroke-dasharray="2 4" opacity={0.85} pointer-events="none">
+              <title>Raw price before filtering (dotted)</title>
+            </path>
+          ))}
           {props.comparison &&
             store.comparisonPowerDifferences.map((difference, index) => (
               <path

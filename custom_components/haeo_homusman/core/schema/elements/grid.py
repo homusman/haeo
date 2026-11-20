@@ -1,6 +1,6 @@
 """Grid element schema definitions."""
 
-from typing import Annotated, Literal, TypedDict
+from typing import Annotated, Literal, NotRequired, TypedDict
 
 import numpy as np
 from numpy.typing import NDArray
@@ -23,6 +23,7 @@ from custom_components.haeo_homusman.core.schema.sections import (
 )
 
 ELEMENT_TYPE = ElementType.GRID
+RAW_PRICE_FIELDS = ("raw_import_price", "raw_export_price")
 
 
 class GridPricingConfig(TypedDict):
@@ -43,6 +44,8 @@ class GridConfigSchema(ConnectedCommonConfig):
     """Grid element configuration as stored in Home Assistant."""
 
     element_type: Literal[ElementType.GRID]
+    raw_import_price: NotRequired[str]
+    raw_export_price: NotRequired[str]
     pricing: Annotated[
         GridPricingConfig,
         SectionHints(
