@@ -24,7 +24,7 @@ from custom_components.haeo_homusman.core.model.elements import (
 )
 
 
-def make_battery_network(periods=(1.0,), initial_charge=5.0, capacity=10.0, **battery_settings):
+def make_battery_network(periods=(1.0,), initial_charge=5.0, capacity=10.0, connected=False, **battery_settings):
     network = Network(name="stability", periods=np.array(periods))
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_BATTERY,
@@ -33,7 +33,7 @@ def make_battery_network(periods=(1.0,), initial_charge=5.0, capacity=10.0, **ba
     })
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_NODE,
-        "name": "grid", "is_source": True, "is_sink": True,
+        "name": "grid", "is_source": not connected, "is_sink": not connected,
     })
     network.add({
         "element_type": MODEL_ELEMENT_TYPE_CONNECTION,
@@ -345,3 +345,85 @@ def test_refinement_preserves_switch_time_and_splits_forecast_values() -> None:
     assert refined == (1800., 3600., 5400., 7200., 9000.)
     result = refine_configs({"element": {"price": np.array([0.2, 0.4])}}, original, refined)
     assert result["element"]["price"] == pytest.approx([0.2, 0.2, 0.4, 0.4])
+
+
+def make_grid_tracking_network(load=1.0, **kwargs):
+    """Build a battery and fixed household load behind an external grid meter."""
+    network = make_battery_network(connected=True, **kwargs)
+    for name, source, sink in (("utility", True, True), ("load", False, True)):
+        network.add({"element_type": MODEL_ELEMENT_TYPE_NODE, "name": name,
+                     "is_source": source, "is_sink": sink})
+    for name, source, target, price in (
+        ("utility:import", "utility", "grid", 0.4),
+        ("utility:export", "grid", "utility", -0.1),
+    ):
+        network.add({"element_type": MODEL_ELEMENT_TYPE_CONNECTION, "name": name,
+                     "source": source, "target": target, "tags": {1}, "is_external": True,
+                     "segments": {"pricing": {"segment_type": "pricing", "price": price}}})
+    network.add({"element_type": MODEL_ELEMENT_TYPE_CONNECTION, "name": "load:connection",
+                 "source": "grid", "target": "load", "tags": {1},
+                 "segments": {"power_limit": {"segment_type": "power_limit", "max_power": load, "fixed": True}}})
+    return network
+
+
+@pytest.mark.parametrize("target", [-0.3, 0.0, 0.3])
+@pytest.mark.parametrize("load", [0.95, 1.05])
+def test_retained_grid_target_precedes_minimum_battery_change(target, load) -> None:
+    network = make_grid_tracking_network(load=load)
+    reference = {"battery:discharge": (1.0 - target,), "battery:charge": (0.0,),
+                 "utility:grid_net": (target,)}
+    network.optimize_incumbent(reference, correction_power=0.1, correction_energy=0.25)
+    actions = network.action_snapshot()
+    assert actions["utility:grid_net"] == pytest.approx((target,), abs=1e-6)
+    assert actions["battery:discharge"] == pytest.approx((load - target,), abs=1e-6)
+
+
+@pytest.mark.parametrize("power,energy,used,expected", [
+    (0.02, 0.25, {}, 0.03), (0.1, 0.02, {}, 0.03),
+    (0.1, 0.25, {"battery": 0.24}, 0.04), (0.0, 0.0, {}, 0.05),
+])
+def test_unreachable_grid_target_respects_adjustment_budgets(power, energy, used, expected) -> None:
+    network = make_grid_tracking_network(load=1.05)
+    network.optimize_incumbent(
+        {"battery:discharge": (1.0,), "battery:charge": (0.0,), "utility:grid_net": (0.0,)},
+        correction_power=power, correction_energy=energy, energy_used=used,
+    )
+    assert network.action_snapshot()["utility:grid_net"] == pytest.approx((expected,), abs=1e-6)
+
+
+def test_soc_protection_precedes_grid_tracking() -> None:
+    network = make_grid_tracking_network(load=1.05, initial_charge=1.0, min_charge=0.05, charge_limit_cost=100.0)
+    network.optimize_incumbent(
+        {"battery:discharge": (1.0,), "battery:charge": (0.0,), "utility:grid_net": (0.0,)},
+        correction_power=0.1, correction_energy=0.25,
+    )
+    assert network.action_snapshot()["battery:discharge"] == pytest.approx((0.95,), abs=1e-6)
+    assert network.action_snapshot()["utility:grid_net"] == pytest.approx((0.1,), abs=1e-6)
+
+
+def test_grid_tracking_does_not_constrain_new_tail() -> None:
+    network = make_grid_tracking_network(load=np.array([1.05, 1.0]), periods=(1.0, 1.0))
+    network.optimize_incumbent(
+        {"battery:discharge": (1.0,), "battery:charge": (0.0,), "utility:grid_net": (0.0,)},
+        correction_power=0.1, correction_energy=0.25,
+    )
+    actions = network.action_snapshot()
+    assert actions["utility:grid_net"][0] == pytest.approx(0.0, abs=1e-6)
+    assert actions["battery:discharge"][1] > 1.0
+
+
+def test_grid_reference_survives_extensions_without_spending_battery_budget() -> None:
+    from custom_components.haeo_homusman.coordinator.plan_acceptance import (
+        correction_summary, elapsed_corrections, extend_reference,
+    )
+
+    original = {"battery:discharge": (1.0,), "battery:charge": (0.0,), "utility:grid_net": (0.0,)}
+    actions = {"battery:discharge": (1.05, 2.0), "battery:charge": (0.0, 0.0), "utility:grid_net": (0.02, -1.0)}
+    reference = extend_reference((1800., 3600., 7200.), (0., 3600.), original, actions)
+    assert reference["utility:grid_net"] == (0.0, -1.0)
+    assert reference["battery:discharge"] == (1.0, 2.0)
+    used = elapsed_corrections((1800., 3600., 7200.), actions, reference, 3600., {})
+    assert used == pytest.approx({"battery": 0.025})
+    summary = correction_summary((1800., 3600., 7200.), actions, reference, {})
+    assert set(summary) == {"battery"}
+    assert summary["battery"]["energy_kwh"] == pytest.approx(0.025)

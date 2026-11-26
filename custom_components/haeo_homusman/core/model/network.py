@@ -309,7 +309,7 @@ class Network:
         return (primary, secondary)
 
     def _action_series(self) -> dict[str, LinearArray]:
-        """Return scheduled storage and flexible-load actions, leaving grid flows free."""
+        """Return controllable actions and signed external-grid tracking references."""
         actions: dict[str, LinearArray] = {}
         for name, element in self.elements.items():
             if isinstance(element, Battery):
@@ -323,6 +323,19 @@ class Network:
                 connection = self.elements.get(f"{name}:connection")
                 if isinstance(connection, Connection):
                     actions[name] = connection.total_measured_power
+        external_endpoints = {
+            endpoint
+            for connection in self.elements.values()
+            if isinstance(connection, Connection) and connection.is_external
+            for endpoint in (connection.source, connection.target)
+        }
+        for name in sorted(external_endpoints):
+            element = self.elements[name]
+            if isinstance(element, Node):
+                produced = element.element_power_produced()
+                consumed = element.element_power_consumed()
+                if produced is not None and consumed is not None:
+                    actions[f"{name}:grid_net"] = produced - consumed
         return actions
 
     def action_snapshot(self) -> dict[str, tuple[float, ...]]:
@@ -354,7 +367,7 @@ class Network:
         correction_power: float = 0.0, correction_energy: float = 0.0,
         energy_used: Mapping[str, float] | None = None,
     ) -> float:
-        """Solve a disposable network with the overlapping schedule fixed."""
+        """Retain bounded battery actions while preferentially tracking accepted grid power."""
         return self.optimize(
             committed_actions=actions, correction_power=correction_power,
             correction_energy=correction_energy, energy_used=energy_used,
@@ -390,6 +403,7 @@ class Network:
                 raise ValueError(msg) from e
 
         commitment_labels: dict[int, RowLabel] = {}
+        grid_tracking_terms: list[LinearArray] = []
         correction_terms: list[LinearArray] = []
         correction_timing_terms: list[LinearArray] = []
         if committed_actions is not None:
@@ -401,6 +415,13 @@ class Network:
             }
             deviations: dict[str, list[LinearArray]] = {}
             for name, actions in committed_actions.items():
+                if name.endswith(":grid_net"):
+                    deviation = h.add_variables(len(actions), name=f"{name}.tracking_error")
+                    delta = series[name][:len(actions)] - np.asarray(actions)
+                    add_rows(h, delta <= deviation)
+                    add_rows(h, -delta <= deviation)
+                    grid_tracking_terms.append((deviation * self.periods[:len(actions)]).total())
+                    continue
                 if name in battery_actions and correction_power > 0 and correction_energy > 0:
                     deviation = h.add_variables(len(actions), name=f"{name}.correction")
                     delta = series[name][:len(actions)] - np.asarray(actions)
@@ -442,15 +463,19 @@ class Network:
         self.conflicts = ()
         self.relaxations = ()
         try:
-            if correction_terms:
+            if correction_terms or grid_tracking_terms:
                 soc_penalty = LinearArray.sum_of([
-                    element.battery_charge_limit_cost()
-                    for element in self.elements.values() if isinstance(element, Battery)
+                    LinearArray.zeros(1),
+                    *[
+                        element.battery_charge_limit_cost()
+                        for element in self.elements.values() if isinstance(element, Battery)
+                    ],
                 ])
                 priorities = (
                     ("minimum SoC target penalty", soc_penalty),
-                    ("minimum necessary correction", LinearArray.sum_of(correction_terms)),
-                    ("later correction preference", LinearArray.sum_of(correction_timing_terms)),
+                    ("minimum accepted-grid tracking error", LinearArray.sum_of([LinearArray.zeros(1), *grid_tracking_terms])),
+                    ("minimum necessary correction", LinearArray.sum_of([LinearArray.zeros(1), *correction_terms])),
+                    ("later correction preference", LinearArray.sum_of([LinearArray.zeros(1), *correction_timing_terms])),
                 )
                 for label, objective in priorities:
                     _set_objective(h, all_col_indices, Objective.of(objective, n_vars))
