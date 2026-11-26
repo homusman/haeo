@@ -6,6 +6,8 @@ The retained solve priorities are: minimize SoC target penalties, minimize accep
 
 Grid references remain anchored to acceptance, and each new tail is optimized freely before becoming part of the reference. Candidate optimization, price filtering, benefit discounts and dispatcher behavior are unchanged. Battery correction diagnostics and revision history continue to apply.
 
+The forecast card also correctly unmounts its rendered contents when removed, cleaning up background timers and subscriptions.
+
 Update HAEO Homusman through HACS and restart Home Assistant Core. No configuration changes are required. A new initial plan is generated after restart. Solis native Self-use can handle short-term transients when selected by the dispatcher, subject to available energy, charging headroom and hardware limits; this release does not add a real-time feedback loop.
 
 To roll back, reinstall v0.7.5 through HACS and restart Core. Production installation remains manual.

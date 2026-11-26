@@ -44,8 +44,19 @@ function internals(controller: ForecastCardController): ForecastControllerIntern
   return controller as unknown as ForecastControllerInternals;
 }
 
+const controllers: ForecastCardController[] = [];
+
+function createController(host: HTMLElement, instanceId: number): ForecastCardController {
+  const controller = new ForecastCardController(host, instanceId);
+  controllers.push(controller);
+  return controller;
+}
+
 describe("ForecastCardController", () => {
   afterEach(() => {
+    for (const controller of controllers.splice(0)) {
+      controller.disconnected();
+    }
     document.body.innerHTML = "";
     vi.restoreAllMocks();
   });
@@ -53,7 +64,7 @@ describe("ForecastCardController", () => {
   it("attaches shadow DOM and renders when connected", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 0);
+    const controller = createController(host, 0);
 
     controller.setConfig(smokeConfig);
     controller.setHass(smokeHass({ "sensor.haeo_grid_import_power": forecastState() }));
@@ -66,7 +77,7 @@ describe("ForecastCardController", () => {
   it("ignores null hass updates and still renders", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 1);
+    const controller = createController(host, 1);
 
     controller.setConfig({ type: "custom:haeo-homusman-forecast-card" });
     controller.setHass(null);
@@ -78,7 +89,7 @@ describe("ForecastCardController", () => {
   it("cleans up pending pointer updates on disconnect", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 2);
+    const controller = createController(host, 2);
     const cancelSpy = vi.spyOn(globalThis, "cancelAnimationFrame");
 
     controller.setConfig(smokeConfig);
@@ -91,12 +102,13 @@ describe("ForecastCardController", () => {
     controller.disconnected();
 
     expect(cancelSpy).toHaveBeenCalled();
+    expect(host.shadowRoot?.querySelector("#mount")?.childElementCount).toBe(0);
   });
 
   it("dispatches ll-update when card size changes", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 3);
+    const controller = createController(host, 3);
     const updates: Event[] = [];
     host.addEventListener("ll-update", (event) => {
       updates.push(event);
@@ -115,7 +127,7 @@ describe("ForecastCardController", () => {
   it("reports card width from the mount element", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 4);
+    const controller = createController(host, 4);
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.id === "mount") {
         return new DOMRect(0, 0, 512, 0);
@@ -132,7 +144,7 @@ describe("ForecastCardController", () => {
   it("skips redundant pointer updates inside the animation frame", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 5);
+    const controller = createController(host, 5);
 
     controller.setConfig(smokeConfig);
     controller.setHass(smokeHass({ "sensor.haeo_grid_import_power": forecastState() }));
@@ -174,7 +186,7 @@ describe("ForecastCardController", () => {
 
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 6);
+    const controller = createController(host, 6);
     const internal = internals(controller);
 
     internal.observeCardResize();
@@ -205,7 +217,7 @@ describe("ForecastCardController", () => {
   it("ignores invalid pointer events and redundant pointer updates", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 7);
+    const controller = createController(host, 7);
     const internal = internals(controller);
 
     controller.setConfig(smokeConfig);
@@ -233,7 +245,7 @@ describe("ForecastCardController", () => {
   it("returns early from render when the mount node is missing", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 8);
+    const controller = createController(host, 8);
     const internal = internals(controller);
 
     controller.connected();
@@ -244,7 +256,7 @@ describe("ForecastCardController", () => {
   it("throws when svg pointer mapping lacks a screen transform", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    const controller = new ForecastCardController(host, 9);
+    const controller = createController(host, 9);
     const internal = internals(controller);
 
     controller.setConfig(smokeConfig);
@@ -262,3 +274,4 @@ describe("ForecastCardController", () => {
     expect(() => internal.onPointerMove(event)).toThrow("Expected non-null SVG screen CTM for pointer mapping");
   });
 });
+

@@ -24,6 +24,7 @@ export class ForecastCardController {
   private pointerFlushScheduled = false;
   private pendingPointer: { x: number | null; y: number | null; comparison: boolean } | null = null;
   private hasRenderedHost = false;
+  private renderMount: Element | null = null;
   private lastReportedCardSize: number | null = null;
 
   constructor(
@@ -63,8 +64,9 @@ export class ForecastCardController {
       this.pointerFlushScheduled = false;
       this.pendingPointer = null;
     }
-    if (this.host.shadowRoot) {
-      render(null, this.host.shadowRoot);
+    if (this.renderMount) {
+      render(null, this.renderMount);
+      this.renderMount = null;
     }
     this.hasRenderedHost = false;
   }
@@ -219,6 +221,7 @@ export class ForecastCardController {
     if (!mount) {
       return;
     }
+    this.renderMount = mount;
     render(
       <ErrorBoundary>
         <ForecastCardView
@@ -231,3 +234,4 @@ export class ForecastCardController {
     );
   }
 }
+
